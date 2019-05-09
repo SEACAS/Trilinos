@@ -44,6 +44,7 @@
 //
 // @HEADER
 #include <Teuchos_UnitTestHarness.hpp>
+#include <Teuchos_XMLParameterListHelpers.hpp>
 
 #include "MueLu_TestHelpers.hpp"
 #include "MueLu_Version.hpp"
@@ -635,6 +636,7 @@ namespace MueLuTests {
         Teuchos::updateParametersFromXmlFileAndBroadcast(xmlFileName,
                                                          Teuchos::Ptr<Teuchos::ParameterList>(&paramList),
                                                          *map->getComm());
+        paramList.set("use kokkos refactor", false); // Done to avoid having kokkos factories called with Epetra
         Teuchos::ParameterList& userParamList = paramList.sublist("user data");
         userParamList.set<RCP<Epetra_MultiVector> >("Coordinates", epcoordinates);
         userParamList.set<RCP<Epetra_MultiVector> >("Nullspace",   epnullspace);
@@ -757,7 +759,12 @@ namespace MueLuTests {
 
       RCP<Epetra_CrsMatrix> epA = MueLu::Utilities<SC,LO,GO,NO>::Op2NonConstEpetraCrs(Op);
 
-      RCP<MueLu::EpetraOperator> eH = MueLu::CreateEpetraPreconditioner(epA, xmlFileName);
+      Teuchos::ParameterList paramList;
+      Teuchos::updateParametersFromXmlFileAndBroadcast(xmlFileName,
+                                                       Teuchos::Ptr<Teuchos::ParameterList>(&paramList),
+                                                       *map->getComm());
+      paramList.set("use kokkos refactor", false);
+      RCP<MueLu::EpetraOperator> eH = MueLu::CreateEpetraPreconditioner(epA, paramList);
 
       eH->Apply(*(Utils::MV2EpetraMV(RHS1)), *(Utils::MV2NonConstEpetraMV(X1)));
       out << "after apply, ||b-A*x||_2 = " << std::setiosflags(std::ios::fixed) << std::setprecision(10) <<
