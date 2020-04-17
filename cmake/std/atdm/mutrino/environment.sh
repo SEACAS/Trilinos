@@ -39,10 +39,11 @@ export ATDM_CONFIG_MPI_EXEC="/opt/slurm/bin/srun"
 export ATDM_CONFIG_MPI_EXEC_NUMPROCS_FLAG="--ntasks"
 export ATDM_CONFIG_MPI_PRE_FLAGS="--mpi=pmi2;--ntasks-per-node;36"
 
-export ATDM_CONFIG_CTEST_PARALLEL_LEVEL=8
-# NOTE: Using -j8 instead of -j16 for ctest is to try to avoid 'srun' "Job
-# <jobid> step creation temporarily disabled" failures on 'mutrino' (see
-# TRIL-214).
+export ATDM_CONFIG_CTEST_PARALLEL_LEVEL=1
+# Using --hint=nomultithread seems to only allow one srun command to run at at
+# time while the others wait.  Threfore, you might as well just run with one
+# ctest process.  This should avoid the false timeouts and failures to start
+# srun we have been seeing for months on mutrino.
 
 if [ "$ATDM_CONFIG_COMPILER" == "INTEL" ] && [ "$ATDM_CONFIG_KOKKOS_ARCH" == "HSW"  ]; then
     module use /projects/EMPIRE/mutrino/tpls/hsw/modulefiles
@@ -71,7 +72,7 @@ fi
 # Load the modules (can't purge)
 module load devpack/20180124/cray/7.6.2/intel/17.0.4
 module load gcc/4.9.3
-module load cmake/3.9.0
+module load cmake/3.14.6
 
 # No RPATH for static builds
 export ATDM_CONFIG_CMAKE_SKIP_INSTALL_RPATH=ON
@@ -79,7 +80,7 @@ export ATDM_CONFIG_CMAKE_SKIP_INSTALL_RPATH=ON
 
 # Use manually installed cmake and ninja to allow usage of ninja and
 # all-at-once mode
-export PATH=/projects/netpub/atdm/cmake-3.11.4/bin:/projects/netpub/atdm/ninja-1.8.2/bin:$PATH
+export PATH=/projects/netpub/atdm/ninja-1.8.2/bin:$PATH
 
 # Set MPI wrappers
 export MPICXX=`which CC`

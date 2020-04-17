@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- mode: python; py-indent-offset: 4; py-continuation-offset: 4 -*-
 # Change above to '/usr/bin/python -3' for python 3.x porting warnings
 """
@@ -14,13 +14,11 @@ sys.dont_write_bytecode = True
 import os
 
 import argparse
-import subprocess
+import shutil
 
 from clean_sentinel import clean_reference_date
 from clean_sentinel import last_clean_date
 from clean_sentinel import update_last_clean_date
-
-from Modules import module
 
 
 class Cleaner(object):
@@ -59,13 +57,10 @@ class Cleaner(object):
 
     def force_clean_space(self):
         """Do the actual cleanup
-             Load the module to enable ninja
-             Run "make -C %s clean"
+             basically just os.unlink()
         """
-        module('load', 'sems-env')
-        module('load', 'sems-ninja_fortran/1.8.2')
-        os.chdir(self.args.dir)
-        subprocess.check_call(['make', 'clean'])
+        if os.path.isdir(self.args.dir):
+            shutil.rmtree(self.args.dir)
 
     def clean_space_by_date(self):
         if last_clean_date() < clean_reference_date():

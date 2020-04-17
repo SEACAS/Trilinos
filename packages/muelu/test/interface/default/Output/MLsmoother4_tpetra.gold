@@ -26,6 +26,7 @@ algorithm = "classical": threshold = 0, blocksize = 1
 aggregation: drop tol = 0   [default]
 aggregation: Dirichlet threshold = 0   [default]
 aggregation: drop scheme = classical   [default]
+aggregation: distance laplacian algo = default   [default]
 lightweight wrap = 1   [default]
 
 BuildAggregates (Phase - (Dirichlet))
@@ -46,6 +47,7 @@ aggregation: allow user-specified singletons = 0   [default]
 aggregation: use interface aggregation = 0   [default]
 aggregation: error on nodes with no on-rank neighbors = 0   [default]
 aggregation: phase3 avoid singletons = 0   [default]
+aggregation: compute aggregate qualities = 0   [default]
 OnePt aggregate map name =    [default]
 OnePt aggregate map factory =    [default]
 Interface aggregate map name =    [default]
@@ -58,6 +60,8 @@ Domain GID offsets = {0}   [default]
 
 tentative: calculate qr = 1   [default]
 tentative: build coarse coordinates = 1   [default]
+tentative: constant column sums = 0   [default]
+Nullspace name = Nullspace   [default]
 matrixmatrix: kernel params -> 
  [empty list]
 
@@ -107,6 +111,7 @@ algorithm = "classical": threshold = 0, blocksize = 1
 aggregation: drop tol = 0   [default]
 aggregation: Dirichlet threshold = 0   [default]
 aggregation: drop scheme = classical   [default]
+aggregation: distance laplacian algo = default   [default]
 lightweight wrap = 1   [default]
 
 BuildAggregates (Phase - (Dirichlet))
@@ -127,6 +132,7 @@ aggregation: allow user-specified singletons = 0   [default]
 aggregation: use interface aggregation = 0   [default]
 aggregation: error on nodes with no on-rank neighbors = 0   [default]
 aggregation: phase3 avoid singletons = 0   [default]
+aggregation: compute aggregate qualities = 0   [default]
 OnePt aggregate map name =    [default]
 OnePt aggregate map factory =    [default]
 Interface aggregate map name =    [default]
@@ -142,6 +148,8 @@ Domain GID offsets = {0}   [default]
 
 tentative: calculate qr = 1   [default]
 tentative: build coarse coordinates = 1   [default]
+tentative: constant column sums = 0   [default]
+Nullspace name = Nullspace   [default]
 matrixmatrix: kernel params -> 
  [empty list]
 
@@ -191,6 +199,7 @@ algorithm = "classical": threshold = 0, blocksize = 1
 aggregation: drop tol = 0   [default]
 aggregation: Dirichlet threshold = 0   [default]
 aggregation: drop scheme = classical   [default]
+aggregation: distance laplacian algo = default   [default]
 lightweight wrap = 1   [default]
 
 BuildAggregates (Phase - (Dirichlet))
@@ -211,6 +220,7 @@ aggregation: allow user-specified singletons = 0   [default]
 aggregation: use interface aggregation = 0   [default]
 aggregation: error on nodes with no on-rank neighbors = 0   [default]
 aggregation: phase3 avoid singletons = 0   [default]
+aggregation: compute aggregate qualities = 0   [default]
 OnePt aggregate map name =    [default]
 OnePt aggregate map factory =    [default]
 Interface aggregate map name =    [default]
@@ -226,6 +236,8 @@ Domain GID offsets = {0}   [default]
 
 tentative: calculate qr = 1   [default]
 tentative: build coarse coordinates = 1   [default]
+tentative: constant column sums = 0   [default]
+Nullspace name = Nullspace   [default]
 matrixmatrix: kernel params -> 
  [empty list]
 
@@ -275,6 +287,7 @@ algorithm = "classical": threshold = 0, blocksize = 1
 aggregation: drop tol = 0   [default]
 aggregation: Dirichlet threshold = 0   [default]
 aggregation: drop scheme = classical   [default]
+aggregation: distance laplacian algo = default   [default]
 lightweight wrap = 1   [default]
 
 BuildAggregates (Phase - (Dirichlet))
@@ -295,6 +308,7 @@ aggregation: allow user-specified singletons = 0   [default]
 aggregation: use interface aggregation = 0   [default]
 aggregation: error on nodes with no on-rank neighbors = 0   [default]
 aggregation: phase3 avoid singletons = 0   [default]
+aggregation: compute aggregate qualities = 0   [default]
 OnePt aggregate map name =    [default]
 OnePt aggregate map factory =    [default]
 Interface aggregate map name =    [default]
@@ -310,6 +324,8 @@ Domain GID offsets = {0}   [default]
 
 tentative: calculate qr = 1   [default]
 tentative: build coarse coordinates = 1   [default]
+tentative: constant column sums = 0   [default]
+Nullspace name = Nullspace   [default]
 matrixmatrix: kernel params -> 
  [empty list]
 
@@ -340,6 +356,8 @@ PreSmoother data = Teuchos::RCP<MueLu::SmootherPrototype<ignored> >{ptr=0,node=0
 PostSmoother data = Teuchos::RCP<MueLu::SmootherPrototype<ignored> >{ptr=0,node=0,strong_count=0,weak_count=0}   [default]
 smoother -> 
  A = Teuchos::RCP<MueLu::FactoryBase const>{ptr=0,node=0,strong_count=0,weak_count=0}
+ Nullspace = Teuchos::RCP<MueLu::FactoryBase const>{ptr=0,node=0,strong_count=0,weak_count=0}   [default]
+ fix nullspace = 0   [default]
 
 
 --------------------------------------------------------------------------------

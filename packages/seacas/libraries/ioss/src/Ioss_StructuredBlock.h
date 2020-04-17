@@ -84,12 +84,12 @@ namespace Ioss {
     // Return number of cell faces in the BC
     size_t get_face_count() const;
 
-    std::string m_bcName;
-    std::string m_famName;
+    std::string m_bcName{};
+    std::string m_famName{};
 
     // These are potentially subsetted due to parallel decompositions...
-    Ioss::IJK_t m_rangeBeg;
-    Ioss::IJK_t m_rangeEnd;
+    Ioss::IJK_t m_rangeBeg{};
+    Ioss::IJK_t m_rangeEnd{};
 
     mutable int m_face{-1};
 
@@ -125,6 +125,7 @@ namespace Ioss {
     EntityType  type() const override { return STRUCTUREDBLOCK; }
 
     const Ioss::NodeBlock &get_node_block() const { return m_nodeBlock; }
+    Ioss::NodeBlock &      get_node_block() { return m_nodeBlock; }
 
     /** \brief Does block contain any cells
      */

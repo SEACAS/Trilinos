@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 National Technology & Engineering Solutions
+// Copyright (c) 2014-2017, 2020 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
@@ -51,7 +51,7 @@
 
 namespace {
   const unsigned int HASHSIZE       = 5939;
-  const char *       version_string = "5.11 (2019/02/27)";
+  const char *       version_string = "5.15 (2020/02/28)";
 
   void output_copyright();
 
@@ -93,6 +93,9 @@ namespace SEAMS {
       for (symrec *ptr = sym_table[hashval]; ptr != nullptr;) {
         symrec *save = ptr;
         ptr          = ptr->next;
+        if (save->type == Parser::token::AVAR) {
+          delete save->value.avar;
+        }
         delete save;
       }
     }
@@ -520,7 +523,8 @@ namespace SEAMS {
           << "  --comment=char or -c=char: Change comment character to 'char'      \n"
           << "      --copyright or -C: Print copyright message                 \n"
           << "   --keep_history or -k: Keep a history of aprepro substitutions.\n"
-          << "          --quiet or -q: (ignored)                               \n"
+          << "                         (not for general interactive use)       \n"
+          << "          --quiet or -q: (deprecated, option is ignored)         \n"
           << "                var=val: Assign value 'val' to variable 'var'    \n"
           << "                         Use var=\\\"sval\\\" for a string variable\n\n"
           << "\tUnits Systems: si, cgs, cgs-ev, shock, swap, ft-lbf-s, ft-lbm-s, in-lbf-s\n"
@@ -719,8 +723,8 @@ namespace SEAMS {
                               << "}\t(immutable)" << '\n';
               }
               else if (ptr->type == Parser::token::SVAR) {
-                if (index(ptr->value.svar.c_str(), '\n') != nullptr ||
-                    index(ptr->value.svar.c_str(), '"') != nullptr) {
+                if (strchr(ptr->value.svar.c_str(), '\n') != nullptr ||
+                    strchr(ptr->value.svar.c_str(), '"') != nullptr) {
                   (*infoStream) << comment << "  {" << std::left << std::setw(width) << ptr->name
                                 << "\t= '" << ptr->value.svar << "'}" << '\n';
                 }
@@ -730,8 +734,8 @@ namespace SEAMS {
                 }
               }
               else if (ptr->type == Parser::token::IMMSVAR) {
-                if (index(ptr->value.svar.c_str(), '\n') != nullptr ||
-                    index(ptr->value.svar.c_str(), '"') != nullptr) {
+                if (strchr(ptr->value.svar.c_str(), '\n') != nullptr ||
+                    strchr(ptr->value.svar.c_str(), '"') != nullptr) {
                   (*infoStream) << comment << "  {" << std::left << std::setw(width) << ptr->name
                                 << "\t= '" << ptr->value.svar << "'}\t(immutable)" << '\n';
                 }
@@ -808,8 +812,7 @@ namespace SEAMS {
     int      maxlen  = 0;
     int      minlen  = INT_MAX;
     int      lengths[MAXLEN];
-    int      longer     = 0;
-    double   hash_ratio = 0.0;
+    int      longer = 0;
 
     Stats stats;
 
@@ -821,7 +824,6 @@ namespace SEAMS {
         chain_len++;
       }
 
-      hash_ratio += chain_len * (chain_len + 1.0);
       entries += chain_len;
       if (chain_len >= MAXLEN) {
         ++longer;
@@ -838,11 +840,8 @@ namespace SEAMS {
       }
     }
 
-    hash_ratio = hash_ratio / (static_cast<float>(entries) / HASHSIZE *
-                               static_cast<float>(entries + 2.0 * HASHSIZE - 1.0));
     (*output) << entries << " entries in " << HASHSIZE << " element hash table, " << lengths[0]
               << " (" << (static_cast<double>(lengths[0]) / HASHSIZE) * 100.0 << "%) empty.\n"
-              << "Hash ratio = " << hash_ratio << "\n"
               << "Mean (nonempty) chain length = " << stats.mean() << ", max = " << maxlen
               << ", min = " << minlen << ", deviation = " << stats.deviation() << "\n";
 
@@ -863,7 +862,7 @@ namespace SEAMS {
     }
 
     if (!original.empty()) {
-      history_data hist;
+      history_data hist{};
       hist.original     = original;
       hist.substitution = substitution;
       hist.index        = outputStream.empty() ? std::streampos(0) : outputStream.top()->tellp();

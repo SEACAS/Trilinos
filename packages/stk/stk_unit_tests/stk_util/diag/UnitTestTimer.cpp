@@ -1,7 +1,8 @@
-// Copyright (c) 2013, Sandia Corporation.
-// Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
-// the U.S. Government retains certain rights in this software.
-// 
+// Copyright 2002 - 2008, 2010, 2011 National Technology Engineering
+// Solutions of Sandia, LLC (NTESS). Under the terms of Contract
+// DE-NA0003525 with NTESS, the U.S. Government retains certain rights
+// in this software.
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -14,10 +15,10 @@
 //       disclaimer in the documentation and/or other materials provided
 //       with the distribution.
 // 
-//     * Neither the name of Sandia Corporation nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-// 
+//     * Neither the name of NTESS nor the names of its contributors
+//       may be used to endorse or promote products derived from this
+//       software without specific prior written permission.
+//
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 // "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 // LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -32,7 +33,8 @@
 // 
 
 #include <stddef.h>                     // for size_t
-#include <unistd.h>                     // for sleep
+#include <chrono>
+#include <thread>
 #include <cmath>                        // for sin
 #include <iostream>                     // for ostringstream, etc
 #include <stk_util/diag/PrintTimer.hpp>  // for printTimersTable
@@ -76,7 +78,7 @@ enum {
 namespace {
 
 double
-work(int repetitions = 100000)
+work(int repetitions = 1000)
 {
   double x = 1.0;
 
@@ -173,21 +175,21 @@ TEST(UnitTestTimer, UnitTest)
     std::ostringstream oss;
     oss << x << std::endl;
     
-    ::sleep(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     lap_timer.lap();
     
     stk::diag::MetricTraits<stk::diag::WallTime>::Type lap_time = lap_timer.getMetric<stk::diag::WallTime>().getLap();
   
-    ASSERT_TRUE(lap_time >= 1.0);
+    EXPECT_NEAR(0.01, lap_time, 1.0e-3);
 
-    ::sleep(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     lap_timer.stop();
     
     lap_time = lap_timer.getMetric<stk::diag::WallTime>().getLap();
   
-    ASSERT_TRUE(lap_time >= 2.0);
+    EXPECT_NEAR(0.02, lap_time, 1.0e-3);
   }
 
   {
@@ -215,7 +217,7 @@ TEST(UnitTestTimer, UnitTest)
     stk::diag::TimeBlock _time2(second_timer_on);
     stk::diag::TimeBlock _time3(second_timer_off);
 
-    ::sleep(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
   // Grab previous subtimer and run 100 laps
@@ -310,10 +312,6 @@ TEST(UnitTestTimer, UnitTest)
         object_vector[j].run();
 
     stk::diag::printTimersTable(strout, unitTestTimer(), stk::diag::METRICS_ALL, true);
-
-    std::cout << strout.str() << std::endl;
-    
-//    dw().m(LOG_TIMER) << strout.str() << stk::diag::dendl;
   }
 }
 
@@ -347,5 +345,4 @@ TEST(UnitTestTimer, YuugeNumberOfTimers)
     }
 
     stk::diag::printTimersTable(strout, rootTimer, stk::diag::METRICS_ALL, false, MPI_COMM_WORLD);
-    std::cout << strout.str() << std::endl;
 }

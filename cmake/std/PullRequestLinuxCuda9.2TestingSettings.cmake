@@ -13,13 +13,13 @@ set (CTEST_USE_LAUNCHERS ON CACHE BOOL "Set by default for PR testing")
 
 # Options necessary for CUDA build
 set (TPL_ENABLE_MPI ON CACHE BOOL "Set by default for CUDA PR testing")
-set (Kokkos_ENABLE_Cuda ON CACHE BOOL "Set by default for CUDA PR testing")
-set (Kokkos_ENABLE_Cuda_UVM ON CACHE BOOL "Set by default for CUDA PR testing")
+set (Kokkos_ENABLE_CUDA ON CACHE BOOL "Set by default for CUDA PR testing")
+set (Kokkos_ENABLE_CUDA_UVM ON CACHE BOOL "Set by default for CUDA PR testing")
 set (KOKKOS_ARCH Power8,Kepler37 CACHE STRING "Set by default for CUDA PR testing")
-set (Kokkos_ENABLE_Cuda_Relocatable_Device_Code OFF CACHE BOOL "Set by default for CUDA PR testing")
+set (Kokkos_ENABLE_CUDA_RELOCATABLE_DEVICE_CODE OFF CACHE BOOL "Set by default for CUDA PR testing")
 set (Sacado_ENABLE_HIERARCHICAL_DFAD ON CACHE BOOL "Set by default for CUDA PR testing")
 set (Kokkos_ENABLE_CXX11_DISPATCH_LAMBDA ON CACHE BOOL "Set by default for CUDA PR testing")
-set (Kokkos_ENABLE_Cuda_Lambda ON CACHE BOOL "Set by default for CUDA PR testing")
+set (Kokkos_ENABLE_CUDA_LAMBDA ON CACHE BOOL "Set by default for CUDA PR testing")
 set (Phalanx_KOKKOS_DEVICE_TYPE CUDA CACHE STRING "Set by default for CUDA PR testing")
 set (MPI_EXEC_POST_NUMPROCS_FLAGS "-map-by;socket:PE=4" CACHE STRING "Set by default for CUDA PR testing")
 
@@ -67,6 +67,10 @@ set (TPL_ENABLE_SuperLUDist OFF CACHE BOOL "Set by default for CUDA PR testing")
 set (TPL_ENABLE_BoostLib OFF CACHE BOOL "Set by default for CUDA PR testing")
 set (TPL_ENABLE_Matio OFF CACHE BOOL "Set by default for CUDA PR testing")
 set (TPL_DLlib_LIBRARIES "-ldl" CACHE FILEPATH "Set by default for CUDA PR testing")
+
+# Disable some packages that can't be tested with this PR build
+set (Trilinos_ENABLE_ShyLU_NodeTacho OFF CACHE BOOL
+  "Can't test Tacho with CUDA without RDC" FORCE)
 
 # Temporary options to clean up build
 set (Teko_ModALPreconditioner_MPI_1_DISABLE ON CACHE BOOL "Temporary disable for CUDA PR testing")

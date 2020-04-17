@@ -38,7 +38,7 @@
 #include <iosfwd>            // for ostream
 #include <string>            // for string
 
-/** \brief A special namespace for the io_info demonstration program interface.
+/** \brief A special namespace for the io_info demonstration program interFace.
  */
 namespace Info {
   class Interface
@@ -74,9 +74,9 @@ namespace Info {
 
     Ioss::GetLongOption options_;
     std::string         filetype_{"exodus"};
-    std::string         filename_;
-    std::string         groupname_;
-    std::string         decompMethod_;
+    std::string         filename_{};
+    std::string         groupname_{};
+    std::string         decompMethod_{};
 
     bool checkNodeStatus_{false};
     bool computeVolume_{false};

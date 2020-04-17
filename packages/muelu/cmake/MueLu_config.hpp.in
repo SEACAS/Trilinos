@@ -25,8 +25,6 @@
 
 #cmakedefine HAVE_MUELU_KOKKOS_REFACTOR
 
-#cmakedefine HAVE_MUELU_KOKKOS_REFACTOR_USE_BY_DEFAULT
-
 #cmakedefine HAVE_MUELU_DEPRECATED_CODE
 
 #cmakedefine HAVE_MUELU_DEPRECATED_TESTS
@@ -92,7 +90,15 @@
 
 #cmakedefine HAVE_MUELU_MKL
 
+/* Special logic for avatar */
+#cmakedefine HAVE_MUELU_AVATART
 #cmakedefine HAVE_MUELU_AVATAR
+#if defined(HAVE_MUELU_AVATART)
+ #define HAVE_MUELU_AVATAR
+#endif
+
+
+#cmakedefine HAVE_MUELU_MLPACK
 
 #cmakedefine HAVE_MUELU_CUSPARSE
 
@@ -100,9 +106,11 @@
 
 /* Flags for active Tpetra nodes if Tpetra is enabled */
 #cmakedefine HAVE_MUELU_SERIAL
-#cmakedefine HAVE_MUELU_PTHREAD
 #cmakedefine HAVE_MUELU_OPENMP
 #cmakedefine HAVE_MUELU_CUDA
+
+#cmakedefine HAVE_MUELU_DEFAULT_GO_LONGLONG
+#cmakedefine HAVE_MUELU_DEFAULT_GO_LONG
 
 /*
  If deprecated warnings are on, and the compiler supports them, then

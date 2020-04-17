@@ -1,7 +1,7 @@
 /* Based on: "$Id: getline.c,v 3.11 1993/12/02 15:54:31 thewalt Exp thewalt $"; */
 
 /*
- * Copyright(C) 2008-2017 National Technology & Engineering Solutions
+ * Copyright(C) 2008-2017, 2020 National Technology & Engineering Solutions
  * of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
  * NTESS, the U.S. Government retains certain rights in this software.
  *
@@ -53,6 +53,7 @@
 #ifndef S_ISREG
 #define S_ISREG(m) (((m)&_S_IFMT) == _S_IFREG)
 #define S_ISDIR(m) (((m)&_S_IFMT) == _S_IFDIR)
+#define isatty _isatty
 #endif
 #ifndef open
 #define open _open
@@ -90,10 +91,6 @@
 #else
 #/* guess */
 #define HAVE_TERMIOS_H 1
-#define HAVE_UNISTD_H 1
-#endif
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
 #endif
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -1049,7 +1046,7 @@ static void gl_killword(int direction)
     while (pos < gl_cnt && isspace(gl_buf[pos]))
       pos++;
   }
-  else { /* backword */
+  else { /* backward */
     if (pos > 0)
       pos--;
     while (pos > 0 && isspace(gl_buf[pos]))
@@ -1075,7 +1072,7 @@ static void gl_killword(int direction)
 
 static void gl_word(int direction)
 
-/* move forward or backword one word */
+/* move forward or backward one word */
 {
   int pos = gl_pos;
 
@@ -1085,7 +1082,7 @@ static void gl_word(int direction)
     while (pos < gl_cnt && isspace(gl_buf[pos]))
       pos++;
   }
-  else { /* backword */
+  else { /* backward */
     if (pos > 0)
       pos--;
     while (pos > 0 && isspace(gl_buf[pos]))
@@ -1346,13 +1343,13 @@ static char *hist_save(char *p)
 
   if (nl) {
     if ((s = (char *)malloc(len)) != 0) {
-      copy_string(s, p, len - 1);
+      copy_string(s, p, len);
       s[len - 1] = 0;
     }
   }
   else {
     if ((s = (char *)malloc(len + 1)) != 0) {
-      strcpy(s, p);
+      copy_string(s, p, len + 1);
     }
   }
   if (s == 0)
@@ -1838,7 +1835,7 @@ void gl_set_home_dir(const char *homedir)
       len         = strlen(homedrive) + strlen(homepath) + 1;
       gl_home_dir = (char *)malloc(len);
       if (gl_home_dir != NULL) {
-        strcpy(gl_home_dir, homedrive);
+        copy_string(gl_home_dir, homedrive, len);
         strcat(gl_home_dir, homepath);
         return;
       }

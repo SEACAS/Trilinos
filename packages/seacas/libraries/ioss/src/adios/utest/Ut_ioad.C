@@ -1,4 +1,4 @@
-// Copyright(C) 1999-2017 National Technology & Engineering Solutions
+// Copyright(C) 1999-2017, 2020 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
@@ -61,7 +61,9 @@
 #ifdef SEACAS_HAVE_MPI
 #include "mpi.h"
 #else
+#ifndef MPI_COMM_WORLD
 #define MPI_COMM_WORLD 1
+#endif
 #endif
 
 #include <algorithm>
@@ -70,7 +72,6 @@
 #include <stddef.h> // for size_t
 #include <stdlib.h> // for rand, srand, RAND_MAX
 #include <string>
-#include <string> // for string
 #include <vector>
 
 //////// Global constants ////////////
@@ -430,7 +431,7 @@ void create_phantom(Ioss::DatabaseIO *db)
     // Exodus seems to always save TRANSIENT fields as `REAL`, so for the tests to pass
     // we only use this type.
     Ioss::Field field(field_name, Ioss::Field::BasicType::REAL, "scalar",
-                      Ioss::Field::RoleType::TRANSIENT, node_count);
+                      Ioss::Field::RoleType::TRANSIENT);
     node_block->field_add(field);
   }
   // Add coordinate frames

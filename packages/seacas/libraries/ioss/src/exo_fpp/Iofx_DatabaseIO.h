@@ -86,7 +86,10 @@ namespace Iofx {
                MPI_Comm communicator, const Ioss::PropertyManager &props);
     DatabaseIO(const DatabaseIO &from) = delete;
     DatabaseIO &operator=(const DatabaseIO &from) = delete;
-    ~DatabaseIO() override{};
+    ~DatabaseIO() override                        = default;
+
+    // Kluge -- a few applications need access so can diretly access exodus API
+    int get_file_pointer() const override; // Open file and set exodusFilePtr.
 
   private:
     void get_step_times__() override;
@@ -108,8 +111,9 @@ namespace Iofx {
                                size_t data_size) const override;
     int64_t get_field_internal(const Ioss::ElementBlock *eb, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
-    int64_t get_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
-                               void *data, size_t data_size) const override
+    int64_t get_field_internal(const Ioss::StructuredBlock * /* sb */,
+                               const Ioss::Field & /* field */, void * /* data */,
+                               size_t /* data_size */) const override
     {
       return -1;
     }
@@ -154,8 +158,9 @@ namespace Iofx {
     int64_t put_field_internal(const Ioss::CommSet *cs, const Ioss::Field &field, void *data,
                                size_t data_size) const override;
 
-    int64_t put_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
-                               void *data, size_t data_size) const override
+    int64_t put_field_internal(const Ioss::StructuredBlock * /* sb */,
+                               const Ioss::Field & /* field */, void * /* data */,
+                               size_t /* data_size */) const override
     {
       return -1;
     }
@@ -164,8 +169,7 @@ namespace Iofx {
     int64_t get_Xset_field_internal(ex_entity_type type, const Ioss::EntitySet *ns,
                                     const Ioss::Field &field, void *data, size_t data_size) const;
 
-    int get_file_pointer() const override; // Open file and set exodusFilePtr.
-
+  private:
     int64_t read_nodal_coordinates();
     void    read_elements(const Ioss::ElementBlock &block);
 

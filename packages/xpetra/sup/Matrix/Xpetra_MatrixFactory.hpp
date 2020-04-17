@@ -60,19 +60,13 @@
 
 namespace Xpetra {
 
-  /*template <class Scalar = Matrix<>::scalar_type,
-            class LocalOrdinal = typename Matrix<Scalar>::local_ordinal_type,
-            class GlobalOrdinal =
-              typename Matrix<Scalar, LocalOrdinal>::global_ordinal_type,
-            class Node =
-              typename Matrix<Scalar, LocalOrdinal, GlobalOrdinal>::node_type>*/
-  template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node>
+  template <class Scalar, class LocalOrdinal, class GlobalOrdinal, class Node = KokkosClassic::DefaultNode::DefaultNodeType>
   class MatrixFactory2 {
 #undef XPETRA_MATRIXFACTORY2_SHORT
 #include "Xpetra_UseShortNames.hpp"
 
   public:
-    static RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > BuildCopy(const RCP<const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > A) {
+    static RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > BuildCopy(const RCP<const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > A, bool setFixedBlockSize = true) {
       RCP<const CrsMatrixWrap> oldOp = Teuchos::rcp_dynamic_cast<const CrsMatrixWrap>(A);
       if (oldOp == Teuchos::null)
         throw Exceptions::BadCast("Cast from Xpetra::Matrix to Xpetra::CrsMatrixWrap failed");
@@ -99,7 +93,8 @@ namespace Xpetra {
         if (oldTCrsOp != Teuchos::null) {
           RCP<TpetraCrsMatrix> newTCrsOp(new TpetraCrsMatrix(*oldTCrsOp));
           RCP<CrsMatrixWrap>   newOp    (new CrsMatrixWrap(Teuchos::as<RCP<CrsMatrix> >(newTCrsOp)));
-          newOp->SetFixedBlockSize(A->GetFixedBlockSize());
+          if (setFixedBlockSize)
+            newOp->SetFixedBlockSize(A->GetFixedBlockSize());
 
           return newOp;
         } else {
@@ -124,7 +119,7 @@ namespace Xpetra {
 #undef XPETRA_MATRIXFACTORY2_SHORT
 #include "Xpetra_UseShortNames.hpp"
   public:
-    static RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > BuildCopy(const RCP<const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > A) {
+    static RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > BuildCopy(const RCP<const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > A, bool setFixedBlockSize = true) {
       RCP<const CrsMatrixWrap> oldOp = Teuchos::rcp_dynamic_cast<const CrsMatrixWrap>(A);
       if (oldOp == Teuchos::null)
         throw Exceptions::BadCast("Cast from Xpetra::Matrix to Xpetra::CrsMatrixWrap failed");
@@ -138,7 +133,8 @@ namespace Xpetra {
         // Underlying matrix is Epetra
         RCP<CrsMatrix>     newECrsOp(new EpetraCrsMatrixT<GlobalOrdinal,Node>(*oldECrsOp));
         RCP<CrsMatrixWrap> newOp    (new CrsMatrixWrap  (newECrsOp));
-        newOp->SetFixedBlockSize(A->GetFixedBlockSize());
+        if (setFixedBlockSize)
+          newOp->SetFixedBlockSize(A->GetFixedBlockSize());
         return newOp;
       }
 #endif
@@ -150,7 +146,8 @@ namespace Xpetra {
       if (oldTCrsOp != Teuchos::null) {
         RCP<CrsMatrix>     newTCrsOp(new TpetraCrsMatrix(*oldTCrsOp));
         RCP<CrsMatrixWrap> newOp    (new CrsMatrixWrap(newTCrsOp));
-        newOp->SetFixedBlockSize(A->GetFixedBlockSize());
+        if (setFixedBlockSize)
+          newOp->SetFixedBlockSize(A->GetFixedBlockSize());
         return newOp;
       }
       return Teuchos::null;
@@ -176,7 +173,7 @@ namespace Xpetra {
 #undef XPETRA_MATRIXFACTORY2_SHORT
 #include "Xpetra_UseShortNames.hpp"
   public:
-    static RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > BuildCopy(const RCP<const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > A) {
+    static RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > BuildCopy(const RCP<const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > A, bool setFixedBlockSize = true) {
       RCP<const CrsMatrixWrap> oldOp = Teuchos::rcp_dynamic_cast<const CrsMatrixWrap>(A);
       if (oldOp == Teuchos::null)
         throw Exceptions::BadCast("Cast from Xpetra::Matrix to Xpetra::CrsMatrixWrap failed");
@@ -190,7 +187,8 @@ namespace Xpetra {
         // Underlying matrix is Epetra
         RCP<CrsMatrix>     newECrsOp(new EpetraCrsMatrixT<GlobalOrdinal,Node>(*oldECrsOp));
         RCP<CrsMatrixWrap> newOp    (new CrsMatrixWrap  (newECrsOp));
-        newOp->SetFixedBlockSize(A->GetFixedBlockSize());
+        if (setFixedBlockSize)
+          newOp->SetFixedBlockSize(A->GetFixedBlockSize());
         return newOp;
       }
 #endif
@@ -202,7 +200,8 @@ namespace Xpetra {
       if (oldTCrsOp != Teuchos::null) {
         RCP<CrsMatrix>     newTCrsOp(new TpetraCrsMatrix(*oldTCrsOp));
         RCP<CrsMatrixWrap> newOp    (new CrsMatrixWrap(newTCrsOp));
-        newOp->SetFixedBlockSize(A->GetFixedBlockSize());
+        if (setFixedBlockSize)
+          newOp->SetFixedBlockSize(A->GetFixedBlockSize());
         return newOp;
       }
 #else
@@ -217,12 +216,10 @@ namespace Xpetra {
 #define XPETRA_MATRIXFACTORY2_SHORT
 
 
-  template <class Scalar = Matrix<>::scalar_type,
-            class LocalOrdinal = typename Matrix<Scalar>::local_ordinal_type,
-            class GlobalOrdinal =
-              typename Matrix<Scalar, LocalOrdinal>::global_ordinal_type,
-            class Node =
-              typename Matrix<Scalar, LocalOrdinal, GlobalOrdinal>::node_type>
+  template <class Scalar,
+            class LocalOrdinal,
+            class GlobalOrdinal,
+            class Node>
   class MatrixFactory {
 #undef XPETRA_MATRIXFACTORY_SHORT
 #include "Xpetra_UseShortNames.hpp"
@@ -232,20 +229,25 @@ namespace Xpetra {
     MatrixFactory() {}
 
   public:
+    /// Constructor for an empty, DynamicProfile matrix.
+    /// Supports Epetra only, as DynamicProfile no longer exists in Tpetra.
+    static RCP<Matrix> Build(const RCP<const Map>& rowMap) {
+      return rcp(new CrsMatrixWrap(rowMap));
+    }
 
     //! Constructor specifying the number of non-zeros for all rows.
-    static RCP<Matrix> Build(const RCP<const Map>& rowMap, size_t maxNumEntriesPerRow, Xpetra::ProfileType pftype = Xpetra::DynamicProfile) {
-      return rcp(new CrsMatrixWrap(rowMap, maxNumEntriesPerRow, pftype));
+    static RCP<Matrix> Build(const RCP<const Map>& rowMap, size_t maxNumEntriesPerRow) {
+      return rcp(new CrsMatrixWrap(rowMap, maxNumEntriesPerRow));
     }
 
     //! Constructor specifying the max number of non-zeros per row and providing column map
-    static RCP<Matrix> Build(const RCP<const Map>& rowMap, const RCP<const Map>& colMap, size_t maxNumEntriesPerRow, Xpetra::ProfileType pftype = Xpetra::DynamicProfile) {
-      return rcp(new CrsMatrixWrap(rowMap, colMap, maxNumEntriesPerRow, pftype));
+    static RCP<Matrix> Build(const RCP<const Map>& rowMap, const RCP<const Map>& colMap, size_t maxNumEntriesPerRow) {
+      return rcp(new CrsMatrixWrap(rowMap, colMap, maxNumEntriesPerRow));
     }
 
     //! Constructor specifying the (possibly different) number of entries per row and providing column map
-    static RCP<Matrix> Build(const RCP<const Map>& rowMap, const RCP<const Map>& colMap, const ArrayRCP<const size_t> &NumEntriesPerRowToAlloc, Xpetra::ProfileType pftype = Xpetra::DynamicProfile) {
-      return rcp(new CrsMatrixWrap(rowMap, colMap, NumEntriesPerRowToAlloc, pftype));
+    static RCP<Matrix> Build(const RCP<const Map>& rowMap, const RCP<const Map>& colMap, const ArrayRCP<const size_t> &NumEntriesPerRowToAlloc) {
+      return rcp(new CrsMatrixWrap(rowMap, colMap, NumEntriesPerRowToAlloc));
     }
 
 #ifdef HAVE_XPETRA_KOKKOS_REFACTOR
@@ -272,8 +274,8 @@ namespace Xpetra {
 #endif
 
     //! Constructor specifying (possibly different) number of entries in each row.
-    static RCP<Matrix> Build(const RCP<const Map> &rowMap, const ArrayRCP<const size_t> &NumEntriesPerRowToAlloc, ProfileType pftype = Xpetra::DynamicProfile) {
-      return rcp( new CrsMatrixWrap(rowMap, NumEntriesPerRowToAlloc, pftype) );
+    static RCP<Matrix> Build(const RCP<const Map> &rowMap, const ArrayRCP<const size_t> &NumEntriesPerRowToAlloc) {
+      return rcp( new CrsMatrixWrap(rowMap, NumEntriesPerRowToAlloc) );
     }
 
     //! Constructor specifying graph
@@ -287,7 +289,7 @@ namespace Xpetra {
       LocalOrdinal                            NumMyElements    = diagonal->getMap()->getNodeNumElements();
       Teuchos::ArrayView<const GlobalOrdinal> MyGlobalElements = diagonal->getMap()->getNodeElementList();
 
-      Teuchos::RCP<CrsMatrixWrap> mtx = Teuchos::rcp(new CrsMatrixWrap(diagonal->getMap(), 1, Xpetra::StaticProfile));
+      Teuchos::RCP<CrsMatrixWrap> mtx = Teuchos::rcp(new CrsMatrixWrap(diagonal->getMap(), 1));
 
       for (LocalOrdinal i = 0; i < NumMyElements; ++i) {
           mtx->insertGlobalValues(MyGlobalElements[i],
@@ -353,10 +355,10 @@ namespace Xpetra {
 
     //! create an explicit copy of a given matrix
     //! This routine supports blocked and single-block operators
-    static RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > BuildCopy(const RCP<const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > A) {
+    static RCP<Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > BuildCopy(const RCP<const Xpetra::Matrix<Scalar, LocalOrdinal, GlobalOrdinal, Node> > A, bool setFixedBlockSize = true) {
       RCP<const BlockedCrsMatrix> input = Teuchos::rcp_dynamic_cast<const BlockedCrsMatrix>(A);
       if(input == Teuchos::null)
-        return Xpetra::MatrixFactory2<Scalar,LocalOrdinal,GlobalOrdinal,Node>::BuildCopy(A);
+        return Xpetra::MatrixFactory2<Scalar,LocalOrdinal,GlobalOrdinal,Node>::BuildCopy(A,setFixedBlockSize);
 
       // deep copy of MapExtractors (and underlying maps)
       RCP<const MapExtractor> rgMapExt = Teuchos::rcp(new MapExtractor(*(input->getRangeMapExtractor())));
@@ -371,7 +373,7 @@ namespace Xpetra {
             // make a deep copy of the matrix
             // This is a recursive call to this function
             RCP<Matrix> mat =
-                Xpetra::MatrixFactory<Scalar,LocalOrdinal,GlobalOrdinal,Node>::BuildCopy(input->getMatrix(r,c));
+                Xpetra::MatrixFactory<Scalar,LocalOrdinal,GlobalOrdinal,Node>::BuildCopy(input->getMatrix(r,c),setFixedBlockSize);
             bop->setMatrix(r,c,mat);
           }
       }

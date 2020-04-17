@@ -111,10 +111,10 @@ namespace Ioss {
     bool is_from_decomp() const { return m_fromDecomp; }
     bool is_active() const { return m_isActive && has_faces(); }
 
-    std::string m_connectionName; // Name of the connection; either generated or from file
-    std::string m_donorName; // Name of the zone (m_donorZone) to which this zone is connected via
-                             // this connection.
-    Ioss::IJK_t m_transform; // The transform.  In the same form as defined by CGNS
+    std::string m_connectionName{}; // Name of the connection; either generated or from file
+    std::string m_donorName{}; // Name of the zone (m_donorZone) to which this zone is connected via
+                               // this connection.
+    Ioss::IJK_t m_transform{}; // The transform.  In the same form as defined by CGNS
 
     // The following are all subsetted down to the portion that is actually on this zone
     // This can be different than m_ownerRange and m_donorRange in a parallel run if the
@@ -130,15 +130,16 @@ namespace Ioss {
     Ioss::IJK_t m_donorOffset{};   // ijk triplet with offset of the donor zone.  Used to convert
                                    // donorRangeBeg and End global indices to local indices
 
+    size_t m_ownerGUID{}; // globally-unique id of owner
+    size_t m_donorGUID{}; // globally-unique id of donor
+
     // NOTE: Shared nodes are "owned" by the zone with the lowest zone id.
-    int    m_ownerZone{};        // "id" of zone that owns this connection
-    int    m_donorZone{};        // "id" of zone that is donor (or other side) of this connection
-    size_t m_ownerGUID{};        // globally-unique id of owner
-    size_t m_donorGUID{};        // globally-unique id of donor
-    int    m_ownerProcessor{-1}; // processor that owns the owner zone
-    int    m_donorProcessor{-1}; // processor that owns the donor zone
-    bool   m_sameRange{false};   // True if owner and donor range should always match...(special use
-                                 // during decomp)
+    int  m_ownerZone{};        // "id" of zone that owns this connection
+    int  m_donorZone{};        // "id" of zone that is donor (or other side) of this connection
+    int  m_ownerProcessor{-1}; // processor that owns the owner zone
+    int  m_donorProcessor{-1}; // processor that owns the donor zone
+    bool m_sameRange{false};   // True if owner and donor range should always match...(special use
+                               // during decomp)
     // True if it is the "lower" zone id in the connection. Uses adam unless both have same adam.
     bool m_ownsSharedNodes{false}; // Deprecate soon
 

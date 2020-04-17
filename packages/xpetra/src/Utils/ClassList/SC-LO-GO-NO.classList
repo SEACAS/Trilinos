@@ -1,4 +1,6 @@
 #BlockedCrsMatrix
+#BlockedMultiVector
+#BlockedVector
 #CrsMatrix
 #CrsMatrixFactory
 #CrsMatrixUtils
@@ -7,14 +9,12 @@
 #Matrix
 #MatrixUtils
 #MatrixFactory
-#MultiVector
 #MultiVectorFactory
 #Operator
 #ReorderedBlockedCrsMatrix
+TpetraBlockCrsMatrix
 TpetraCrsMatrix
-#TpetraMultiVector
 ##TpetraVbrMatrix
-#TpetraVector
 ##VbrMatrix
 #Vector
-#VectorFactory
+VectorFactory

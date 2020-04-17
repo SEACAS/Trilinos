@@ -22,10 +22,16 @@ set(Tpetra_INST_SERIAL ON CACHE BOOL "Set by default for PR testing")
 # Disable just one Teko sub-unit test that fails with openmpi 1.10 (#2712)
 set (Teko_DISABLE_LSCSTABALIZED_TPETRA_ALPAH_INV_D ON CACHE BOOL "Temporarily disabled in PR testing")
 
+# Enable the ensemble reduction in this build to maintain Stokhos with ensemble reduction (#7067)
+set (Stokhos_ENABLE_Ensemble_Reduction ON CACHE BOOL "Enable reduction across ensemble components")
+
 # Disable three ShyLu_DD tests - see #2691
 set (ShyLU_DDFROSch_test_frosch_laplacian_epetra_2d_gdsw_MPI_4_DISABLE ON CACHE BOOL "Temporarily disabled in PR testing")
 set (ShyLU_DDFROSch_test_frosch_laplacian_epetra_2d_rgdsw_MPI_4_DISABLE ON CACHE BOOL "Temporarily disabled in PR testing")
 set (ShyLU_DDFROSch_test_frosch_interfacesets_2D_MPI_4_DISABLE ON CACHE BOOL "Temporarily disabled in PR testing")
+
+# this build is different from the others in using static libraries
+set (BUILD_SHARED_LIBS OFF CACHE BOOL "Off by default for PR testing in GCC 4.8.4")
 
 include("${CMAKE_CURRENT_LIST_DIR}/PullRequestLinuxCommonTestingSettings.cmake")
 
