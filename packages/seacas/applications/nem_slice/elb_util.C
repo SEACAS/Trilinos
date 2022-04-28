@@ -1,44 +1,9 @@
 /*
- * Copyright (C) 2009-2017, 2020 National Technology & Engineering Solutions of
- * Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
+ * Copyright(C) 1999-2021 National Technology & Engineering Solutions
+ * of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
  * NTESS, the U.S. Government retains certain rights in this software.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *
- *     * Neither the name of NTESS nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * See packages/seacas/LICENSE for details
  */
 
 /*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -270,14 +235,10 @@ namespace {
 
   template <typename INT> void gds_qsort(INT v[], size_t left, size_t right)
   {
-    size_t pivot;
-    size_t i;
-    size_t j;
-
     if (left + GDS_QSORT_CUTOFF <= right) {
-      pivot = gds_median3(v, left, right);
-      i     = left;
-      j     = right - 1;
+      size_t pivot = gds_median3(v, left, right);
+      size_t i     = left;
+      size_t j     = right - 1;
 
       for (;;) {
         while (v[++i] < v[pivot]) {
@@ -302,17 +263,13 @@ namespace {
 
   template <typename INT> void gds_isort(INT v[], size_t N)
   {
-    size_t i;
-    size_t j;
-    size_t ndx = 0;
-    INT    small_val;
-    INT    tmp;
-
     if (N <= 1) {
       return;
     }
-    small_val = v[0];
-    for (i = 1; i < N; i++) {
+
+    size_t ndx       = 0;
+    INT    small_val = v[0];
+    for (size_t i = 1; i < N; i++) {
       if (v[i] < small_val) {
         small_val = v[i];
         ndx       = i;
@@ -321,8 +278,9 @@ namespace {
     /* Put smallest value in slot 0 */
     ISWAP(v, 0, ndx);
 
-    for (i = 1; i < N; i++) {
-      tmp = v[i];
+    size_t j;
+    for (size_t i = 1; i < N; i++) {
+      INT tmp = v[i];
       for (j = i; tmp < v[j - 1]; j--) {
         v[j] = v[j - 1];
       }
@@ -333,7 +291,6 @@ namespace {
   template <typename INT> void siftDowniii(INT *a, INT *b, INT *c, size_t start, size_t end)
   {
     size_t root = start;
-
     while (root * 2 + 1 < end) {
       size_t child = 2 * root + 1;
       if ((child + 1 < end) &&
@@ -378,7 +335,7 @@ void find_first_last(INT val, size_t vecsize, INT *vector, INT *first, INT *last
   *last  = -1;
 
   /* See if value is in the vector */
-  ssize_t i = bin_search2(val, vecsize, vector);
+  int64_t i = bin_search2(val, vecsize, vector);
   *first    = i; /* Save this location */
 
   if (i != -1) {
@@ -411,7 +368,7 @@ void find_first_last(INT val, size_t vecsize, INT *vector, INT *first, INT *last
  *              array with a second value
  *****************************************************************************/
 template <typename INT>
-ssize_t find_int(INT value1, INT value2, size_t start, size_t stop, INT *vector1, INT *vector2)
+int64_t find_int(INT value1, INT value2, size_t start, size_t stop, INT *vector1, INT *vector2)
 {
   for (size_t i = start; i <= stop; i++) {
     if ((vector1[i] == value1) && (vector2[i] == value2)) {
@@ -430,10 +387,10 @@ ssize_t find_int(INT value1, INT value2, size_t start, size_t stop, INT *vector1
  * found in the vector then it's index in that vector is returned, otherwise
  * the function returns -1;
  *****************************************************************************/
-template ssize_t in_list(int value, size_t count, int *vector);
-template ssize_t in_list(int64_t value, size_t count, int64_t *vector);
+template int64_t in_list(int value, size_t count, const int *vector);
+template int64_t in_list(int64_t value, size_t count, const int64_t *vector);
 
-template <typename INT> ssize_t in_list(INT value, size_t count, INT *vector)
+template <typename INT> int64_t in_list(INT value, size_t count, const INT *vector)
 {
   for (size_t i = 0; i < count; i++) {
     if (vector[i] == value) {
@@ -443,10 +400,10 @@ template <typename INT> ssize_t in_list(INT value, size_t count, INT *vector)
   return -1;
 }
 
-template ssize_t in_list(int value, std::vector<int> vector);
-template ssize_t in_list(int64_t value, std::vector<int64_t> vector);
+template int64_t in_list(int value, const std::vector<int> &vector);
+template int64_t in_list(int64_t value, const std::vector<int64_t> &vector);
 
-template <typename INT> ssize_t in_list(INT value, std::vector<INT> vector)
+template <typename INT> int64_t in_list(INT value, const std::vector<INT> &vector)
 {
   size_t count = vector.size();
   for (size_t i = 0; i < count; i++) {
@@ -467,13 +424,10 @@ template <typename INT> ssize_t in_list(INT value, std::vector<INT> vector)
  *****************************************************************************/
 int roundfloat(float value)
 {
-  float high;
-  float low;
-  int   ans;
+  float high = std::ceil(value);
+  float low  = std::floor(value);
 
-  high = std::ceil(value);
-  low  = std::floor(value);
-
+  int ans;
   if ((value - low) < (high - value)) {
     ans = static_cast<int>(low);
   }
@@ -852,15 +806,15 @@ template <typename INT> void qsort2(INT *v1, INT *v2, size_t N)
 #endif
 }
 
-template void                sort3(ssize_t count, int ra[], int rb[], int rc[]);
-template void                sort3(ssize_t count, int64_t ra[], int64_t rb[], int64_t rc[]);
-template <typename INT> void sort3(ssize_t count, INT ra[], INT rb[], INT rc[])
+template void                sort3(int64_t count, int ra[], int rb[], int rc[]);
+template void                sort3(int64_t count, int64_t ra[], int64_t rb[], int64_t rc[]);
+template <typename INT> void sort3(int64_t count, INT ra[], INT rb[], INT rc[])
 {
   if (count <= 1) {
     return;
   }
   /* heapify */
-  for (ssize_t start = (count - 2) / 2; start >= 0; start--) {
+  for (int64_t start = (count - 2) / 2; start >= 0; start--) {
     siftDowniii(ra, rb, rc, start, count);
   }
 
@@ -872,9 +826,9 @@ template <typename INT> void sort3(ssize_t count, INT ra[], INT rb[], INT rc[])
   }
 }
 
-template ssize_t                bin_search2(int value, size_t num, int List[]);
-template ssize_t                bin_search2(int64_t value, size_t num, int64_t List[]);
-template <typename INT> ssize_t bin_search2(INT value, size_t num, INT List[])
+template int64_t                bin_search2(int value, size_t num, int List[]);
+template int64_t                bin_search2(int64_t value, size_t num, int64_t List[]);
+template <typename INT> int64_t bin_search2(INT value, size_t num, INT List[])
 {
 
   /*

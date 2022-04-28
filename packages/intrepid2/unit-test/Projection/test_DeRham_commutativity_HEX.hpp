@@ -106,11 +106,11 @@ namespace Test {
       *outStream << "-------------------------------------------------------------------------------" << "\n\n"; \
     }
 
-template<typename ValueType, typename DeviceSpaceType>
+template<typename ValueType, typename DeviceType>
 int DeRhamCommutativityHex(const bool verbose) {
 
-  typedef Kokkos::DynRankView<ValueType,DeviceSpaceType> DynRankView;
-  typedef Kokkos::DynRankView<ordinal_type,DeviceSpaceType> DynRankViewInt;
+  typedef Kokkos::DynRankView<ValueType,DeviceType> DynRankView;
+  typedef Kokkos::DynRankView<ordinal_type,DeviceType> DynRankViewInt;
 #define ConstructWithLabel(obj, ...) obj(#obj, __VA_ARGS__)
 
   Teuchos::RCP<std::ostream> outStream;
@@ -123,13 +123,6 @@ int DeRhamCommutativityHex(const bool verbose) {
 
   Teuchos::oblackholestream oldFormatState;
   oldFormatState.copyfmt(std::cout);
-
-  typedef typename
-      Kokkos::Impl::is_space<DeviceSpaceType>::host_mirror_space::execution_space HostSpaceType ;
-
-  *outStream << "DeviceSpace::  "; DeviceSpaceType::print_configuration(*outStream, false);
-  *outStream << "HostSpace::    ";   HostSpaceType::print_configuration(*outStream, false);
-  *outStream << "\n";
 
   int errorFlag = 0;
   const ValueType tol = tolerence();
@@ -154,13 +147,10 @@ int DeRhamCommutativityHex(const bool verbose) {
       switch (comp) {
       case 0:
         return 4*x*x*x*(y - 2);
-        break;
       case 1:
         return x*x*x*x + 1;
-        break;
       case 2:
         return 0;
-        break;
       default:
         return 0;
       }
@@ -182,13 +172,10 @@ int DeRhamCommutativityHex(const bool verbose) {
       switch (comp) {
       case 0:
         return f0 + a*x;
-        break;
       case 1:
         return f1 + a*y;
-        break;
       case 2:
         return f2 + a*z;
-        break;
       default:
         return 0;
       }
@@ -229,13 +216,10 @@ int DeRhamCommutativityHex(const bool verbose) {
       switch (comp) {
       case 0:
         return f0 + (a1*z-a2*y);//2*x+y-z + (x+2*(y+z);
-        break;
       case 1:
         return f1 + (a2*x-a0*z);//y+2*(z+x);
-        break;
       case 2:
         return f2 + (a0*y-a1*x);//z+2*(x+y);
-        break;
       default:
         return 0;
       }
@@ -264,13 +248,10 @@ int DeRhamCommutativityHex(const bool verbose) {
       switch (comp) {
       case 0:
         return gf2[1] - gf1[2] + 2*a0 + (x*ga0[0]+y*ga0[1]+z*ga0[2]) - x*diva;//2*x+y-z + (x+2*(y+z);
-        break;
       case 1:
         return gf0[2] - gf2[0] + 2*a1 + (x*ga1[0]+y*ga1[1]+z*ga1[2]) - y*diva;//y+2*(z+x);
-        break;
       case 2:
         return gf1[0] - gf0[1] + 2*a2 + (x*ga2[0]+y*ga2[1]+z*ga2[2]) - z*diva;//z+2*(x+y);
-        break;
       default:
         return 0;
       }
@@ -281,11 +262,11 @@ int DeRhamCommutativityHex(const bool verbose) {
   };
 
   typedef std::array<ordinal_type,4> faceType;
-  typedef CellTools<DeviceSpaceType> ct;
-  typedef OrientationTools<DeviceSpaceType> ots;
-  typedef Experimental::ProjectionTools<DeviceSpaceType> pts;
-  typedef RealSpaceTools<DeviceSpaceType> rst;
-  typedef FunctionSpaceTools<DeviceSpaceType> fst;
+  typedef CellTools<DeviceType> ct;
+  typedef OrientationTools<DeviceType> ots;
+  typedef Experimental::ProjectionTools<DeviceType> pts;
+  typedef RealSpaceTools<DeviceType> rst;
+  typedef FunctionSpaceTools<DeviceType> fst;
 
   constexpr ordinal_type dim = 3;
   constexpr ordinal_type numCells = 2;
@@ -371,18 +352,18 @@ int DeRhamCommutativityHex(const bool verbose) {
               physVertexes(i,j,k) = vertices[hexas[i][j]][k];
 
         //compute reference points
-        Basis_HGRAD_HEX_Cn_FEM<DeviceSpaceType,ValueType,ValueType> warpBasis(order,POINTTYPE_WARPBLEND); //used only for computing reference points
+        Basis_HGRAD_HEX_Cn_FEM<DeviceType,ValueType,ValueType> warpBasis(order,POINTTYPE_WARPBLEND); //used only for computing reference points
         ordinal_type numRefCoords = warpBasis.getCardinality();
         DynRankView ConstructWithLabel(refPoints, numRefCoords, dim);
         warpBasis.getDofCoords(refPoints);
 
         // compute orientations for cells (one time computation)
         DynRankViewInt elemNodes(&hexas[0][0], 2, numElemVertexes);
-        Kokkos::DynRankView<Orientation,DeviceSpaceType> elemOrts("elemOrts", numCells);
+        Kokkos::DynRankView<Orientation,DeviceType> elemOrts("elemOrts", numCells);
         ots::getOrientation(elemOrts, elemNodes, hexa);
 
-        Basis_HGRAD_HEX_Cn_FEM<DeviceSpaceType,ValueType,ValueType> basis(order);
-        Basis_HCURL_HEX_In_FEM<DeviceSpaceType,ValueType,ValueType> basisHCurl(order);
+        Basis_HGRAD_HEX_Cn_FEM<DeviceType,ValueType,ValueType> basis(order);
+        Basis_HCURL_HEX_In_FEM<DeviceType,ValueType,ValueType> basisHCurl(order);
         ordinal_type basisCardinality = basis.getCardinality();
         ordinal_type basisHCurlCardinality = basisHCurl.getCardinality();
 
@@ -392,7 +373,7 @@ int DeRhamCommutativityHex(const bool verbose) {
         {
           ordinal_type targetCubDegree(Fun::degree()),targetDerivCubDegree(GradFun::degree());
 
-          Experimental::ProjectionStruct<DeviceSpaceType,ValueType> projStruct;
+          Experimental::ProjectionStruct<DeviceType,ValueType> projStruct;
           projStruct.createHGradProjectionStruct(&basis, targetCubDegree, targetDerivCubDegree);
           ordinal_type numPoints = projStruct.getNumTargetEvalPoints(), numGradPoints = projStruct.getNumTargetDerivEvalPoints();
           DynRankView ConstructWithLabel(evaluationPoints, numCells, numPoints, dim);
@@ -409,7 +390,7 @@ int DeRhamCommutativityHex(const bool verbose) {
           DynRankView ConstructWithLabel(physEvalPoints, numCells, numPoints, dim);
           DynRankView ConstructWithLabel(physEvalGradPoints, numCells, numGradPoints, dim);
           {
-            Basis_HGRAD_HEX_C1_FEM<DeviceSpaceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
+            Basis_HGRAD_HEX_C1_FEM<DeviceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalPoints, hexa.getNodeCount(), numPoints);
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalGradPoints, hexa.getNodeCount(), numGradPoints);
 
@@ -463,7 +444,7 @@ int DeRhamCommutativityHex(const bool verbose) {
         {
           ordinal_type targetCubDegree(GradFun::degree()),targetDerivCubDegree(0);
 
-          Experimental::ProjectionStruct<DeviceSpaceType,ValueType> projStruct;
+          Experimental::ProjectionStruct<DeviceType,ValueType> projStruct;
           projStruct.createHCurlProjectionStruct(&basisHCurl, targetCubDegree, targetDerivCubDegree);
 
           ordinal_type numPoints = projStruct.getNumTargetEvalPoints(), numDivPoints = projStruct.getNumTargetDerivEvalPoints();
@@ -482,7 +463,7 @@ int DeRhamCommutativityHex(const bool verbose) {
 
           DynRankView ConstructWithLabel(physEvalPoints, numCells, numPoints, dim);
           {
-            Basis_HGRAD_HEX_C1_FEM<DeviceSpaceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
+            Basis_HGRAD_HEX_C1_FEM<DeviceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalPoints, hexa.getNodeCount(), numPoints);
 
             for(ordinal_type i=0; i<numCells; ++i) {
@@ -693,19 +674,19 @@ int DeRhamCommutativityHex(const bool verbose) {
               physVertexes(i,j,k) = vertices[hexas[i][j]][k];
 
         //compute reference points
-        Basis_HGRAD_HEX_Cn_FEM<DeviceSpaceType,ValueType,ValueType> warpBasis(order,POINTTYPE_WARPBLEND); //used only for computing reference points
+        Basis_HGRAD_HEX_Cn_FEM<DeviceType,ValueType,ValueType> warpBasis(order,POINTTYPE_WARPBLEND); //used only for computing reference points
         ordinal_type numRefCoords = warpBasis.getCardinality();
         DynRankView ConstructWithLabel(refPoints, numRefCoords, dim);
         warpBasis.getDofCoords(refPoints);
 
         // compute orientations for cells (one time computation)
         DynRankViewInt elemNodes(&hexas[0][0], 2, numElemVertexes);
-        Kokkos::DynRankView<Orientation,DeviceSpaceType> elemOrts("elemOrts", numCells);
+        Kokkos::DynRankView<Orientation,DeviceType> elemOrts("elemOrts", numCells);
         ots::getOrientation(elemOrts, elemNodes, hexa);
 
 
-        Basis_HCURL_HEX_In_FEM<DeviceSpaceType,ValueType,ValueType> basis(order);
-        Basis_HDIV_HEX_In_FEM<DeviceSpaceType,ValueType,ValueType> basisHDiv(order);
+        Basis_HCURL_HEX_In_FEM<DeviceType,ValueType,ValueType> basis(order);
+        Basis_HDIV_HEX_In_FEM<DeviceType,ValueType,ValueType> basisHDiv(order);
         ordinal_type basisCardinality = basis.getCardinality();
         ordinal_type basisHDivCardinality = basisHDiv.getCardinality();
 
@@ -715,7 +696,7 @@ int DeRhamCommutativityHex(const bool verbose) {
           ordinal_type targetCubDegree(FunCurl::degree()),targetDerivCubDegree(CurlFunCurl::degree());
 
 
-          Experimental::ProjectionStruct<DeviceSpaceType,ValueType> projStruct;
+          Experimental::ProjectionStruct<DeviceType,ValueType> projStruct;
           projStruct.createHCurlProjectionStruct(&basis, targetCubDegree, targetDerivCubDegree);
 
           ordinal_type numPoints = projStruct.getNumTargetEvalPoints(), numCurlPoints = projStruct.getNumTargetDerivEvalPoints();
@@ -735,7 +716,7 @@ int DeRhamCommutativityHex(const bool verbose) {
           DynRankView ConstructWithLabel(physEvalPoints, numCells, numPoints, dim);
           DynRankView ConstructWithLabel(physEvalCurlPoints, numCells, numCurlPoints, dim);
           {
-            Basis_HGRAD_HEX_C1_FEM<DeviceSpaceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
+            Basis_HGRAD_HEX_C1_FEM<DeviceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalPoints, hexa.getNodeCount(), numPoints);
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalCurlPoints, hexa.getNodeCount(), numCurlPoints);
 
@@ -800,7 +781,7 @@ int DeRhamCommutativityHex(const bool verbose) {
         {
           ordinal_type targetCubDegree(CurlFunCurl::degree()),targetDerivCubDegree(0);
 
-          Experimental::ProjectionStruct<DeviceSpaceType,ValueType> projStruct;
+          Experimental::ProjectionStruct<DeviceType,ValueType> projStruct;
           projStruct.createHDivProjectionStruct(&basisHDiv, targetCubDegree, targetDerivCubDegree);
 
           ordinal_type numPoints = projStruct.getNumTargetEvalPoints(), numDivPoints = projStruct.getNumTargetDerivEvalPoints();
@@ -819,7 +800,7 @@ int DeRhamCommutativityHex(const bool verbose) {
 
           DynRankView ConstructWithLabel(physEvalPoints, numCells, numPoints, dim);
           {
-            Basis_HGRAD_HEX_C1_FEM<DeviceSpaceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
+            Basis_HGRAD_HEX_C1_FEM<DeviceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalPoints, hexa.getNodeCount(), numPoints);
 
             for(ordinal_type i=0; i<numCells; ++i) {
@@ -1028,17 +1009,17 @@ int DeRhamCommutativityHex(const bool verbose) {
 
         // compute orientations for cells (one time computation)
         DynRankViewInt elemNodes(&hexas[0][0], numCells, numElemVertexes);
-        Kokkos::DynRankView<Orientation,DeviceSpaceType> elemOrts("elemOrts", numCells);
+        Kokkos::DynRankView<Orientation,DeviceType> elemOrts("elemOrts", numCells);
         ots::getOrientation(elemOrts, elemNodes, hexa);
 
         //compute reference points
-        Basis_HGRAD_HEX_Cn_FEM<DeviceSpaceType,ValueType,ValueType> warpBasis(order,POINTTYPE_WARPBLEND); //used only for computing reference points
+        Basis_HGRAD_HEX_Cn_FEM<DeviceType,ValueType,ValueType> warpBasis(order,POINTTYPE_WARPBLEND); //used only for computing reference points
         ordinal_type numRefCoords = warpBasis.getCardinality();
         DynRankView ConstructWithLabel(refPoints, numRefCoords, dim);
         warpBasis.getDofCoords(refPoints);
 
-        Basis_HDIV_HEX_In_FEM<DeviceSpaceType,ValueType,ValueType> basis(order);
-        Basis_HVOL_HEX_Cn_FEM<DeviceSpaceType,ValueType,ValueType> basisHVol(order-1);
+        Basis_HDIV_HEX_In_FEM<DeviceType,ValueType,ValueType> basis(order);
+        Basis_HVOL_HEX_Cn_FEM<DeviceType,ValueType,ValueType> basisHVol(order-1);
         ordinal_type basisCardinality = basis.getCardinality();
         ordinal_type basisHVolCardinality = basisHVol.getCardinality();
 
@@ -1048,7 +1029,7 @@ int DeRhamCommutativityHex(const bool verbose) {
           ordinal_type targetCubDegree(FunDiv::degree()),targetDerivCubDegree(DivFunDiv::degree());
 
 
-          Experimental::ProjectionStruct<DeviceSpaceType,ValueType> projStruct;
+          Experimental::ProjectionStruct<DeviceType,ValueType> projStruct;
           projStruct.createHDivProjectionStruct(&basis, targetCubDegree, targetDerivCubDegree);
 
           ordinal_type numPoints = projStruct.getNumTargetEvalPoints(), numDivPoints = projStruct.getNumTargetDerivEvalPoints();
@@ -1068,7 +1049,7 @@ int DeRhamCommutativityHex(const bool verbose) {
           DynRankView ConstructWithLabel(physEvalPoints, numCells, numPoints, dim);
           DynRankView ConstructWithLabel(physEvalDivPoints, numCells, numDivPoints, dim);
           {
-            Basis_HGRAD_HEX_C1_FEM<DeviceSpaceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
+            Basis_HGRAD_HEX_C1_FEM<DeviceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalPoints, hexa.getNodeCount(), numPoints);
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalDivPoints, hexa.getNodeCount(), numDivPoints);
 
@@ -1131,7 +1112,7 @@ int DeRhamCommutativityHex(const bool verbose) {
         {
           ordinal_type targetCubDegree(DivFunDiv::degree());
 
-          Experimental::ProjectionStruct<DeviceSpaceType,ValueType> projStruct;
+          Experimental::ProjectionStruct<DeviceType,ValueType> projStruct;
           projStruct.createHVolProjectionStruct(&basisHVol, targetCubDegree);
 
           ordinal_type numPoints = projStruct.getNumTargetEvalPoints(), numDivPoints = projStruct.getNumTargetDerivEvalPoints();
@@ -1148,7 +1129,7 @@ int DeRhamCommutativityHex(const bool verbose) {
 
           DynRankView ConstructWithLabel(physEvalPoints, numCells, numPoints, dim);
           {
-            Basis_HGRAD_HEX_C1_FEM<DeviceSpaceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
+            Basis_HGRAD_HEX_C1_FEM<DeviceType,ValueType,ValueType> hexLinearBasis; //used for computing physical coordinates
             DynRankView ConstructWithLabel(hexLinearBasisValuesAtEvalPoints, hexa.getNodeCount(), numPoints);
 
             for(ordinal_type i=0; i<numCells; ++i) {

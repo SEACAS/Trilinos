@@ -368,6 +368,18 @@ IF (${PACKAGE_NAME}_ENABLE_SuperLUDist) # This naming syntax is consistent with 
     )
 ENDIF()
 
+IF (${PACKAGE_NAME}_ENABLE_STRUMPACK)
+  APPEND_SET(HEADERS
+    Amesos2_STRUMPACK.hpp
+    Amesos2_STRUMPACK_decl.hpp
+    Amesos2_STRUMPACK_def.hpp
+    )
+
+  APPEND_SET(SOURCES
+    Amesos2_STRUMPACK.cpp
+    )
+ENDIF()
+
 IF (${PACKAGE_NAME}_ENABLE_PARDISO_MKL)
   APPEND_SET(HEADERS
     Amesos2_PardisoMKL.hpp
@@ -444,17 +456,19 @@ IF (${PACKAGE_NAME}_ENABLE_Experimental)
 ENDIF()
 
 IF (${PACKAGE_NAME}_ENABLE_CUSOLVER)
-  APPEND_SET(HEADERS
-    Amesos2_cuSOLVER.hpp
-    Amesos2_cuSOLVER_decl.hpp
-    Amesos2_cuSOLVER_def.hpp
-    Amesos2_cuSOLVER_FunctionMap.hpp
-    Amesos2_cuSOLVER_TypeMap.hpp
-  )
+  IF (${PACKAGE_NAME}_ENABLE_CUSPARSE)
+    APPEND_SET(HEADERS
+      Amesos2_cuSOLVER.hpp
+      Amesos2_cuSOLVER_decl.hpp
+      Amesos2_cuSOLVER_def.hpp
+      Amesos2_cuSOLVER_FunctionMap.hpp
+      Amesos2_cuSOLVER_TypeMap.hpp
+    )
 
-  APPEND_SET(SOURCES
-    Amesos2_cuSOLVER.cpp
-  )
+    APPEND_SET(SOURCES
+      Amesos2_cuSOLVER.cpp
+    )
+  ENDIF()
 ENDIF()
 
 #

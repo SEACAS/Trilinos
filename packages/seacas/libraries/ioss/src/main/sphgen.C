@@ -1,34 +1,8 @@
-// Copyright(C) 1999-2017 National Technology & Engineering Solutions
+// Copyright(C) 1999-2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
 #include <Ionit_Initializer.h>
 #include <Ioss_CodeTypes.h>
@@ -56,7 +30,7 @@
 #include "Ioss_ScopeGuard.h"
 #include "Ioss_State.h"
 
-#define OUTPUT std::cerr
+#define DO_OUTPUT std::cerr
 
 // ========================================================================
 
@@ -166,43 +140,43 @@ int main(int argc, char *argv[])
     return (EXIT_FAILURE);
   }
 
-  OUTPUT << "Input:    '" << in_file << "', Type: " << in_type << '\n';
-  OUTPUT << "Output:   '" << out_file << "', Type: " << out_type << '\n';
-  OUTPUT << '\n';
+  DO_OUTPUT << "Input:    '" << in_file << "', Type: " << in_type << '\n';
+  DO_OUTPUT << "Output:   '" << out_file << "', Type: " << out_type << '\n';
+  DO_OUTPUT << '\n';
 
   create_sph(in_file, in_type, out_file, out_type, globals);
 
-  OUTPUT << "\n" << codename << " execution successful.\n";
+  DO_OUTPUT << "\n" << codename << " execution successful.\n";
   return EXIT_SUCCESS;
 }
 
 namespace {
   void show_usage(const std::string &prog)
   {
-    OUTPUT << "\nUSAGE: " << prog << " in_file out_file\n"
-           << "...or: " << prog << " command_file\n"
-           << "       version: " << version << "\n\n"
-           << "\tConverts all HEX element blocks to SPHERE element blocks\n"
-           << "\tand creates a nodeset for each element block containing the node at the center of "
-              "the sphere.\n"
-           << "\tignores all other element block types and deletes all existing nodesets.\n"
-           << "Options:\n"
-           << "\t--directory or -d {dir}  : specifies current working directory\n"
-           << "\t--input     or -i {file} : read input and output filename data from file\n"
-           << "\t--in_type {pamgen|generated|exodus} : set input type to the argument. Default "
-              "exodus\n"
-           << "\t--out_type {exodus} : set output type to the argument. Default exodus\n"
-           << "\t--scale_factor : radius = (volume/scale_factor)^1/3; default = 8.0\n"
-           << "\t\t which gives the half-side-length of a cube with that volume\n"
-           << "\t\t use 4*pi/3 = 4.18879 for the radius of a sphere with that volume.\n";
+    DO_OUTPUT
+        << "\nUSAGE: " << prog << " in_file out_file\n"
+        << "...or: " << prog << " command_file\n"
+        << "       version: " << version << "\n\n"
+        << "\tConverts all HEX element blocks to SPHERE element blocks\n"
+        << "\tand creates a nodeset for each element block containing the node at the center of "
+           "the sphere.\n"
+        << "\tignores all other element block types and deletes all existing nodesets.\n"
+        << "Options:\n"
+        << "\t--directory or -d {dir}  : specifies current working directory\n"
+        << "\t--input     or -i {file} : read input and output filename data from file\n"
+        << "\t--in_type {pamgen|generated|exodus} : set input type to the argument. Default "
+           "exodus\n"
+        << "\t--out_type {exodus} : set output type to the argument. Default exodus\n"
+        << "\t--scale_factor : radius = (volume/scale_factor)^1/3; default = 8.0\n"
+        << "\t\t which gives the half-side-length of a cube with that volume\n"
+        << "\t\t use 4*pi/3 = 4.18879 for the radius of a sphere with that volume.\n";
 
-    Ioss::NameList db_types;
-    Ioss::IOFactory::describe(&db_types);
-    OUTPUT << "\nSupports database types:\n\t";
-    for (Ioss::NameList::const_iterator IF = db_types.begin(); IF != db_types.end(); ++IF) {
-      OUTPUT << *IF << "  ";
+    Ioss::NameList db_types = Ioss::IOFactory::describe();
+    DO_OUTPUT << "\nSupports database types:\n\t";
+    for (const auto &db : db_types) {
+      DO_OUTPUT << db << "  ";
     }
-    OUTPUT << "\n\n";
+    DO_OUTPUT << "\n\n";
   }
 
   void create_sph(const std::string &inpfile, const std::string &input_type,
@@ -212,8 +186,8 @@ namespace {
     // INPUT ...
     // NOTE: The "READ_RESTART" mode ensures that the node and element ids will be mapped.
     //========================================================================
-    Ioss::DatabaseIO *dbi =
-        Ioss::IOFactory::create(input_type, inpfile, Ioss::READ_RESTART, (MPI_Comm)MPI_COMM_WORLD);
+    Ioss::DatabaseIO *dbi = Ioss::IOFactory::create(input_type, inpfile, Ioss::READ_RESTART,
+                                                    Ioss::ParallelUtils::comm_world());
     if (dbi == nullptr || !dbi->ok(true)) {
       std::exit(EXIT_FAILURE);
     }
@@ -222,14 +196,14 @@ namespace {
     Ioss::Region region(dbi, "region_1");
 
     if (!region.get_nodesets().empty()) {
-      OUTPUT << " *** All nodesets will be replaced by element block nodesets\n";
+      DO_OUTPUT << " *** All nodesets will be replaced by element block nodesets\n";
     }
 
     //========================================================================
     // OUTPUT ...
     //========================================================================
     Ioss::DatabaseIO *dbo = Ioss::IOFactory::create(output_type, outfile, Ioss::WRITE_RESTART,
-                                                    (MPI_Comm)MPI_COMM_WORLD);
+                                                    Ioss::ParallelUtils::comm_world());
     if (dbo == nullptr || !dbo->ok(true)) {
       std::exit(EXIT_FAILURE);
     }
@@ -259,12 +233,12 @@ namespace {
     // that will be the number of output element and nodes in the
     // sphere mesh.
     size_t                                      sph_node_count = 0;
-    const Ioss::ElementBlockContainer &         ebs            = region.get_element_blocks();
+    const Ioss::ElementBlockContainer          &ebs            = region.get_element_blocks();
     Ioss::ElementBlockContainer::const_iterator I              = ebs.begin();
     while (I != ebs.end()) {
       Ioss::ElementBlock *eb = *I;
       ++I;
-      std::string type = eb->get_property("topology_type").get_string();
+      std::string type = eb->topology()->name();
       if (type == Ioss::Hex8::name) {
         sph_node_count += eb->entity_count();
 
@@ -301,7 +275,7 @@ namespace {
 
     output_region.begin_mode(Ioss::STATE_MODEL);
 
-    Ioss::NodeBlock *   nb = region.get_node_blocks()[0];
+    Ioss::NodeBlock    *nb = region.get_node_blocks()[0];
     std::vector<double> coordinates;
     nb->get_field_data("mesh_model_coordinates", coordinates);
 
@@ -317,7 +291,7 @@ namespace {
     I             = ebs.begin();
     size_t offset = 0;
     while (I != ebs.end()) {
-      if ((*I)->get_property("topology_type").get_string() == Ioss::Hex8::name) {
+      if ((*I)->topology()->name() == Ioss::Hex8::name) {
 
         std::vector<double> volume;
         std::vector<double> radius;

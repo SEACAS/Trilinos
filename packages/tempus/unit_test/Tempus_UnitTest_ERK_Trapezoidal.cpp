@@ -6,11 +6,8 @@
 // ****************************************************************************
 // @HEADER
 
-#include "Teuchos_UnitTestHarness.hpp"
+#include "Tempus_UnitTest_RK_Utils.hpp"
 
-#include "Tempus_UnitTest_Utils.hpp"
-
-#include "../TestModels/SinCosModel.hpp"
 
 namespace Tempus_Unit_Test {
 
@@ -24,7 +21,11 @@ using Teuchos::rcp_dynamic_cast;
 // ************************************************************
 TEUCHOS_UNIT_TEST(ERK_Trapezoidal, Default_Construction)
 {
-  testExplicitRKAccessorsFullConstruction("RK Explicit Trapezoidal");
+  auto stepper = rcp(new Tempus::StepperERK_Trapezoidal<double>());
+  testExplicitRKAccessorsFullConstruction(stepper);
+
+  // Test stepper properties.
+  TEUCHOS_ASSERT(stepper->getOrder() == 2);
 }
 
 
@@ -41,7 +42,9 @@ TEUCHOS_UNIT_TEST(ERK_Trapezoidal, StepperFactory_Construction)
 // ************************************************************
 TEUCHOS_UNIT_TEST(ERK_Trapezoidal, AppAction)
 {
-  testRKAppAction("RK Explicit Trapezoidal", out, success);
+  auto stepper = rcp(new Tempus::StepperERK_Trapezoidal<double>());
+  auto model = rcp(new Tempus_Test::SinCosModel<double>());
+  testRKAppAction(stepper, model, out, success);
 }
 
 

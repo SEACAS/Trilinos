@@ -1,35 +1,8 @@
-// Copyright (c) 2014-2017 National Technology & Engineering Solutions
+// Copyright(C) 1999-2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
+// See packages/seacas/LICENSE for details
 %{
 #include "aprepro.h"
 #include "apr_util.h"
@@ -46,12 +19,19 @@
 namespace {
   void reset_error()
   {
+#if !defined(WIN32) && !defined(__WIN32__) && !defined(_WIN32) && !defined(_MSC_VER) &&            \
+    !defined(__MINGW32__) && !defined(_WIN64) && !defined(__MINGW64__)
+#ifndef math_errhandling
+#define math_errhandling MATH_ERRNO
+#endif
+
     if (math_errhandling & MATH_ERREXCEPT) {
       std::feclearexcept(FE_ALL_EXCEPT);
     }
     if (math_errhandling & MATH_ERRNO) {
       errno = 0;
     }
+#endif
   }
 }
 
@@ -184,7 +164,7 @@ bool:     sexp LT sexp          { $$ = (strcmp($1,$3) <  0 ? 1 : 0);    }
         | sexp EQ  sexp         { $$ = (strcmp($1,$3) == 0 ? 1 : 0);    }
         | sexp NE  sexp         { $$ = (strcmp($1,$3) != 0 ? 1 : 0);    }
 
-aexp:   AVAR                    { $$ = new array(*($1->value.avar));}
+aexp:   AVAR                    { $$ = aprepro->make_array(*($1->value.avar)); }
         | AFNCT LPAR sexp RPAR  {
           if (arg_check($1, $1->value.arrfnct_c == NULL))
             $$ = (*($1->value.arrfnct_c))($3);
@@ -235,7 +215,7 @@ aexp:   AVAR                    { $$ = new array(*($1->value.avar));}
                                   $1->value.avar= $3;
                                   redefined_warning(aprepro, $1);
                                   set_type(aprepro, $1, token::AVAR);           }
-        | AVAR EQUAL aexp       { $$ = $3; delete $1->value.avar; $1->value.avar = $3;
+        | AVAR EQUAL aexp       { $$ = $3; aprepro.redefine_array($1->value.avar); $1->value.avar = $3;
                                   redefined_warning(aprepro, $1);
                                   set_type(aprepro, $1, token::AVAR); }
         | UNDVAR EQUAL aexp     { $$ = $3; $1->value.avar = $3;
@@ -283,7 +263,7 @@ sexp:     QSTRING               { $$ = $1;                              }
                                   redefined_warning(aprepro, $1);
                                   set_type(aprepro, $1, token::SVAR);           }
         | AVAR EQUAL sexp       { $$ = $3;
-	                          delete $1->value.avar;
+                                  aprepro.redefine_array($1->value.avar);
                                   $1->value.svar= $3;
                                   redefined_warning(aprepro, $1);
                                   set_type(aprepro, $1, token::SVAR);           }
@@ -361,7 +341,7 @@ exp:      NUM                   { $$ = $1;                              }
                                   redefined_warning(aprepro, $1);
                                   set_type(aprepro, $1, token::VAR);                    }
         | AVAR EQUAL exp        { $$ = $3;
-	                          delete $1->value.avar;
+	                          aprepro.redefine_array($1->value.avar);
                                   $1->value.var= $3;
                                   redefined_warning(aprepro, $1);
                                   set_type(aprepro, $1, token::VAR);           }

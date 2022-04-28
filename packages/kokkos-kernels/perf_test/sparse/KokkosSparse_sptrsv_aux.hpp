@@ -248,10 +248,10 @@ std::string getCuSparseErrorString(cusparseStatus_t status) {
 #endif
 
 /* ========================================================================================= */
+#if defined(KOKKOSKERNELS_ENABLE_TPL_CUSPARSE) 
 template <typename crsmat_t, typename host_crsmat_t>
 bool check_cusparse(host_crsmat_t &Mtx, bool col_majorL, crsmat_t &L, bool col_majorU, crsmat_t &U,
                     int *perm_r, int *perm_c, double tol, int loop) {
-#if defined(KOKKOSKERNELS_ENABLE_TPL_CUSPARSE) 
   using values_view_t = typename crsmat_t::values_type::non_const_type;
   using scalar_t      = typename values_view_t::value_type;
   using size_type     = typename crsmat_t::size_type;
@@ -586,7 +586,7 @@ bool check_cusparse(host_crsmat_t &Mtx, bool col_majorL, crsmat_t &L, bool col_m
     // ==============================================
     // Benchmark
     // L-solve
-    double min_time = 1.0e32;
+    double min_time = 0.0;
     double max_time = 0.0;
     double ave_time = 0.0;
     Kokkos::fence();
@@ -614,8 +614,8 @@ bool check_cusparse(host_crsmat_t &Mtx, bool col_majorL, crsmat_t &L, bool col_m
         time = timer.seconds();
       }
       ave_time += time;
-      if(time > max_time) max_time = time;
-      if(time < min_time) min_time = time;
+      if(time > max_time || i == 0) max_time = time;
+      if(time < min_time || i == 0) min_time = time;
     }
     std::cout << " L-solve: loop = " << loop << std::endl;
     std::cout << "  LOOP_AVG_TIME:  " << ave_time/loop << std::endl;
@@ -623,7 +623,7 @@ bool check_cusparse(host_crsmat_t &Mtx, bool col_majorL, crsmat_t &L, bool col_m
     std::cout << "  LOOP_MIN_TIME:  " << min_time << std::endl << std::endl;
 
     // U-solve
-    min_time = 1.0e32;
+    min_time = 0.0;
     max_time = 0.0;
     ave_time = 0.0;
     Kokkos::fence();
@@ -651,8 +651,8 @@ bool check_cusparse(host_crsmat_t &Mtx, bool col_majorL, crsmat_t &L, bool col_m
         time = timer.seconds();
       }
       ave_time += time;
-      if(time > max_time) max_time = time;
-      if(time < min_time) min_time = time;
+      if(time > max_time || i == 0) max_time = time;
+      if(time < min_time || i == 0) min_time = time;
     }
     std::cout << " U-solve: loop = " << loop << std::endl;
     std::cout << "  LOOP_AVG_TIME:  " << ave_time/loop << std::endl;
@@ -660,11 +660,15 @@ bool check_cusparse(host_crsmat_t &Mtx, bool col_majorL, crsmat_t &L, bool col_m
     std::cout << "  LOOP_MIN_TIME:  " << min_time << std::endl << std::endl;
   }
   return success;
+}
 #else
+template <typename crsmat_t, typename host_crsmat_t>
+bool check_cusparse(host_crsmat_t & /*Mtx*/, bool /*col_majorL*/, crsmat_t & /*L*/, bool /*col_majorU*/, crsmat_t & /*U*/,
+                    int * /*perm_r*/, int * /*perm_c*/, double /*tol*/, int /*loop*/) {
   printf( " KOKKOSKERNELS_ENABLE_TPL_CUSPARSE **not** enabled\n" );
   return false;
-#endif
 }
+#endif
 
 } // namespace Experiment
 } // namespace PerfTest

@@ -1,37 +1,13 @@
-// Copyright(C) 2009-2010-2017 National Technology & Engineering Solutions
+// Copyright(C) 1999-2021 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
 #include "CJ_CodeTypes.h" // for StringIdVector, etc
 #include "CJ_ExodusFile.h"
 #include "CJ_SystemInterface.h"
+#include "open_file_limit.h"
 #include "smart_assert.h"
 
 #include <climits>
@@ -52,10 +28,6 @@ std::string              Excn::ExodusFile::outputFilename_;
 bool                     Excn::ExodusFile::keepOpen_          = false;
 int                      Excn::ExodusFile::maximumNameLength_ = 32;
 int                      Excn::ExodusFile::exodusMode_        = 0;
-
-namespace {
-  int get_free_descriptor_count();
-} // namespace
 
 Excn::ExodusFile::ExodusFile(size_t which) : myLocation_(which)
 {
@@ -119,7 +91,7 @@ void Excn::ExodusFile::close_all()
 bool Excn::ExodusFile::initialize(const SystemInterface &si)
 {
   // See if we can keep files open
-  size_t max_files = get_free_descriptor_count();
+  size_t max_files = open_file_limit() - 1; // We also have an output exodus file...
   if (si.inputFiles_.size() <= max_files) {
     keepOpen_ = true;
     if ((si.debug() & 1) != 0) {
@@ -209,7 +181,7 @@ bool Excn::ExodusFile::create_output(const SystemInterface &si)
     mode |= EX_ALL_INT64_DB;
   }
 
-  if (si.compress_data() > 0 || si.use_netcdf4()) {
+  if (si.compress_data() > 0 || si.use_netcdf4() || si.szip()) {
     mode |= EX_NETCDF4;
   }
 
@@ -223,49 +195,16 @@ bool Excn::ExodusFile::create_output(const SystemInterface &si)
   if (si.compress_data() > 0) {
     ex_set_option(outputId_, EX_OPT_COMPRESSION_LEVEL, si.compress_data());
     ex_set_option(outputId_, EX_OPT_COMPRESSION_SHUFFLE, 1);
+
+    if (si.szip()) {
+      ex_set_option(outputId_, EX_OPT_COMPRESSION_TYPE, EX_COMPRESS_SZIP);
+    }
+    else if (si.zlib()) {
+      ex_set_option(outputId_, EX_OPT_COMPRESSION_TYPE, EX_COMPRESS_ZLIB);
+    }
   }
 
   fmt::print("IO Word size is {} bytes.\n", ioWordSize_);
   ex_set_max_name_length(outputId_, maximumNameLength_);
   return true;
 }
-
-#if defined(__PUMAGON__)
-#include <stdio.h>
-#else
-#include <unistd.h>
-#endif
-
-namespace {
-  int get_free_descriptor_count()
-  {
-// Returns maximum number of files that one process can have open
-// at one time. (POSIX)
-#ifndef _MSC_VER
-    int fdmax = sysconf(_SC_OPEN_MAX);
-    if (fdmax == -1) {
-      // POSIX indication that there is no limit on open files...
-      fdmax = INT_MAX;
-    }
-#else
-    int fdmax = _getmaxstdio();
-#endif
-
-    // File descriptors are assigned in order (0,1,2,3,...) on a per-process
-    // basis.
-
-    // Assume that we have stdin, stdout, stderr, and output exodus
-    // file (4 total).
-
-    return fdmax - 4;
-
-    // Could iterate from 0..fdmax and check for the first
-    // EBADF (bad file descriptor) error return from fcntl, but that takes
-    // too long and may cause other problems.  There is a isastream(filedes)
-    // call on Solaris that can be used for system-dependent code.
-    //
-    // Another possibility is to do an open and see which descriptor is
-    // returned -- take that as 1 more than the current count of open files.
-    //
-  }
-} // namespace

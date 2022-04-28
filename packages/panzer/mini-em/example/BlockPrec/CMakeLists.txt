@@ -7,6 +7,7 @@ SET(BLOCK_PREC_SOURCES
 TRIBITS_ADD_EXECUTABLE(
   BlockPrec
   SOURCES ${BLOCK_PREC_SOURCES}
+  CATEGORIES BASIC PERFORMANCE
   )
 
 TRIBITS_COPY_FILES_TO_BINARY_DIR(CopyBlockPrecFiles
@@ -23,6 +24,16 @@ TRIBITS_COPY_FILES_TO_BINARY_DIR(CopyBlockPrecFiles
   solverMLRefMaxwell.xml
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
   DEST_DIR ${CMAKE_CURRENT_BINARY_DIR}
+  )
+
+TRIBITS_COPY_FILES_TO_BINARY_DIR(CopyBlockPrecPerfFiles
+  SOURCE_FILES
+  maxwell-large.xml
+  solverMueLuRefMaxwell.xml solverMueLuRefMaxwell2D.xml solverMueLuRefMaxwellEpetra.xml
+  solverMueLuRefMaxwellOpenMP.xml solverMueLuRefMaxwellCuda.xml
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
+  DEST_DIR ${CMAKE_CURRENT_BINARY_DIR}
+  CATEGORIES PERFORMANCE
   )
 
 # rather than list all files like above, I glob all xmls
@@ -104,6 +115,53 @@ TRIBITS_ADD_TEST(
    NUM_MPI_PROCS 4
    )
 
+ TRIBITS_ADD_TEST(
+   BlockPrec
+   NAME "MiniEM-BlockPrec_RefMaxwell_reuse"
+   ARGS "--solver=MueLu-RefMaxwell --numTimeSteps=3 --linAlgebra=Tpetra --resetSolver"
+   COMM serial mpi
+   NUM_MPI_PROCS 1
+   )
+
+ TRIBITS_ADD_TEST(
+   BlockPrec
+   NAME "MiniEM-BlockPrec_RefMaxwell_reuse"
+   ARGS "--solver=MueLu-RefMaxwell --numTimeSteps=3 --linAlgebra=Tpetra --resetSolver"
+   COMM mpi
+   NUM_MPI_PROCS 4
+   )
+
+ # Large performance-testing runs of 3D BlockPrec_RefMaxwell (4 and 16 ranks)
+TRIBITS_ADD_TEST(
+   BlockPrec
+   NAME "MiniEM-BlockPrec_RefMaxwell_Performance_4"
+   ARGS "--stacked-timer --solver=MueLu-RefMaxwell --numTimeSteps=3 --linAlgebra=Tpetra --inputFile=maxwell-large.xml"
+   COMM mpi
+   NUM_MPI_PROCS 4
+   CATEGORIES PERFORMANCE
+   RUN_SERIAL
+   )
+
+TRIBITS_ADD_TEST(
+   BlockPrec
+   NAME "MiniEM-BlockPrec_RefMaxwell_Performance_16"
+   ARGS "--stacked-timer --solver=MueLu-RefMaxwell --numTimeSteps=3 --linAlgebra=Tpetra --inputFile=maxwell-large.xml"
+   COMM mpi
+   NUM_MPI_PROCS 16
+   CATEGORIES PERFORMANCE
+   RUN_SERIAL
+   )
+
+ TRIBITS_ADD_TEST(
+   BlockPrec
+   NAME "MiniEM-BlockPrec_RefMaxwell_Performance_16_reuse"
+   ARGS "--stacked-timer --solver=MueLu-RefMaxwell --numTimeSteps=20 --linAlgebra=Tpetra --inputFile=maxwell-large.xml --resetSolver --test-name=\"MiniEM 3D RefMaxwell Reuse\""
+   COMM mpi
+   NUM_MPI_PROCS 16
+   CATEGORIES PERFORMANCE
+   RUN_SERIAL
+   )
+
 IF(NOT Kokkos_ENABLE_CUDA AND NOT Kokkos_ENABLE_OPENMP)
 
   TRIBITS_ADD_TEST(
@@ -134,6 +192,22 @@ IF(NOT Kokkos_ENABLE_CUDA AND NOT Kokkos_ENABLE_OPENMP AND MueLu_ENABLE_Epetra A
    COMM mpi
    NUM_MPI_PROCS 4
    )
+
+ TRIBITS_ADD_TEST(
+   BlockPrec
+   NAME "MiniEM-BlockPrec_RefMaxwell_Epetra_reuse"
+   ARGS "--solver=MueLu-RefMaxwell --numTimeSteps=3 --linAlgebra=Epetra --resetSolver"
+   COMM serial mpi
+   NUM_MPI_PROCS 1
+   )
+
+ # TRIBITS_ADD_TEST(
+ #   BlockPrec
+ #   NAME "MiniEM-BlockPrec_RefMaxwell_Epetra_reuse"
+ #   ARGS "--solver=MueLu-RefMaxwell --numTimeSteps=3 --linAlgebra=Epetra --resetSolver"
+ #   COMM mpi
+ #   NUM_MPI_PROCS 4
+ #   )
 
 ENDIF()
 

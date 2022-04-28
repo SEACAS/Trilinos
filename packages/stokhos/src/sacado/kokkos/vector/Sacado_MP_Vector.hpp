@@ -59,6 +59,7 @@
 #include "Stokhos_mpl_for_each.hpp"
 #include "Stokhos_MemoryTraits.hpp"
 #include "Stokhos_Is_Constant.hpp"
+#include "Stokhos_ViewStorage.hpp"
 
 #include "Kokkos_View_Utils.hpp"
 
@@ -190,7 +191,7 @@ namespace Sacado {
       /*!
        * May not intialize the coefficient array.
        */
-      KOKKOS_INLINE_FUNCTION
+      KOKKOS_DEFAULTED_FUNCTION
       Vector() = default;
 
       //! Constructor with supplied value \c x
@@ -220,7 +221,7 @@ namespace Sacado {
       Vector(const storage_type& ss) : s(ss) {}
 
       //! Copy constructor
-      KOKKOS_INLINE_FUNCTION
+      KOKKOS_DEFAULTED_FUNCTION
       Vector(const Vector& x) = default;
 
       //! Copy constructor
@@ -266,7 +267,7 @@ namespace Sacado {
       Vector(std::initializer_list<value_type> l) : s(l.size(), l.begin()) {}
 
       //! Destructor
-      KOKKOS_INLINE_FUNCTION
+      KOKKOS_DEFAULTED_FUNCTION
       ~Vector() = default;
 
       //! Initialize coefficients to value

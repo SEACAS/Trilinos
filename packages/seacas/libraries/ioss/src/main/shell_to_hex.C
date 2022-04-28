@@ -1,34 +1,8 @@
-// Copyright(C) 1999-2017 National Technology & Engineering Solutions
+// Copyright(C) 1999-2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
 #include <Ioss_CodeTypes.h>
 
@@ -234,11 +208,10 @@ namespace {
 
     std::cerr << "...or: " << prog << " command_file\n";
     std::cerr << "       version: " << version << "\n";
-    Ioss::NameList db_types;
-    Ioss::IOFactory::describe(&db_types);
+    Ioss::NameList db_types = Ioss::IOFactory::describe();
     std::cerr << "\nSupports database types:\n\t";
-    for (Ioss::NameList::const_iterator IF = db_types.begin(); IF != db_types.end(); ++IF) {
-      std::cerr << *IF << "  ";
+    for (const auto &db : db_types) {
+      std::cerr << db << "  ";
     }
     std::cerr << "\n\n";
   }
@@ -250,8 +223,8 @@ namespace {
     // INPUT ...
     // NOTE: The "READ_RESTART" mode ensures that the node and element ids will be mapped.
     //========================================================================
-    Ioss::DatabaseIO *dbi =
-        Ioss::IOFactory::create(input_type, inpfile, Ioss::READ_RESTART, (MPI_Comm)MPI_COMM_WORLD);
+    Ioss::DatabaseIO *dbi = Ioss::IOFactory::create(input_type, inpfile, Ioss::READ_RESTART,
+                                                    Ioss::ParallelUtils::comm_world());
     if (dbi == nullptr || !dbi->ok()) {
       std::cerr << "ERROR: Could not open database '" << inpfile << "' of type '" << input_type
                 << "'\n";
@@ -265,7 +238,7 @@ namespace {
     // OUTPUT ...
     //========================================================================
     Ioss::DatabaseIO *dbo = Ioss::IOFactory::create(output_type, outfile, Ioss::WRITE_RESTART,
-                                                    (MPI_Comm)MPI_COMM_WORLD);
+                                                    Ioss::ParallelUtils::comm_world());
     if (dbo == nullptr || !dbo->ok()) {
       std::cerr << "ERROR: Could not create output database '" << outfile << "' of type '"
                 << output_type << "'\n";
@@ -308,15 +281,15 @@ namespace {
 
   void transfer_nodeblock(Ioss::Region &region, Ioss::Region &output_region, bool debug)
   {
-    const Ioss::NodeBlockContainer &         nbs = region.get_node_blocks();
+    const Ioss::NodeBlockContainer          &nbs = region.get_node_blocks();
     Ioss::NodeBlockContainer::const_iterator i   = nbs.begin();
     while (i != nbs.end()) {
       const std::string &name = (*i)->name();
       if (debug) {
         std::cerr << name << ", ";
       }
-      int num_nodes = (*i)->entity_count();
-      int degree    = (*i)->get_property("component_degree").get_int();
+      auto num_nodes = (*i)->entity_count();
+      int  degree    = (*i)->get_property("component_degree").get_int();
       if (!debug) {
         std::cerr << " Number of coordinates per node       =" << std::setw(9) << degree << "\n";
         std::cerr << " Number of nodes                      =" << std::setw(9) << num_nodes << "\n";
@@ -333,9 +306,9 @@ namespace {
 
   void transfer_elementblock(Ioss::Region &region, Ioss::Region &output_region, bool debug)
   {
-    const Ioss::ElementBlockContainer &         ebs            = region.get_element_blocks();
+    const Ioss::ElementBlockContainer          &ebs            = region.get_element_blocks();
     Ioss::ElementBlockContainer::const_iterator i              = ebs.begin();
-    int                                         total_elements = 0;
+    size_t                                      total_elements = 0;
     while (i != ebs.end()) {
       const std::string &name = (*i)->name();
       if (debug) {
@@ -388,7 +361,7 @@ namespace {
     Ioss::NodeBlock *nbo = (*output_region.get_node_blocks().begin());
 
     // Get the nodal coordinates...
-    int num_nodes = nb->entity_count();
+    auto num_nodes = nb->entity_count();
 
     {
       std::vector<int> ids(2 * num_nodes);
@@ -420,8 +393,8 @@ namespace {
       Ioss::ElementBlock *out_eb = *out_ib;
       ++out_ib;
 
-      int num_elem          = eb->entity_count();
-      int num_node_per_elem = eb->topology()->number_nodes();
+      auto num_elem          = eb->entity_count();
+      auto num_node_per_elem = eb->topology()->number_nodes();
 
       // Get the connectivity array...
       conn.resize(num_elem * num_node_per_elem);
@@ -434,7 +407,7 @@ namespace {
       eb->get_field_data("connectivity", conn);
 
       // Connectivity is in global id space; change to local...
-      for (int i = 0; i < num_elem * num_node_per_elem; i++) {
+      for (int64_t i = 0; i < num_elem * num_node_per_elem; i++) {
         int local = region.node_global_to_local(conn[i]);
         conn[i]   = local - 1;
       }

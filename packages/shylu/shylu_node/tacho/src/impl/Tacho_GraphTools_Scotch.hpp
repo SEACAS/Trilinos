@@ -4,8 +4,9 @@
 /// \file Tacho_GraphTools_Scotch.hpp
 /// \author Kyungjoo Kim (kyukim@sandia.gov)
 
-#if defined(TACHO_HAVE_SCOTCH)
 #include "Tacho_Util.hpp"
+
+#if defined(TACHO_HAVE_SCOTCH)
 #include "Tacho_Graph.hpp"
 
 #include "scotch.h"
@@ -117,7 +118,7 @@ namespace Tacho {
       ///
 
       void reorder(const ordinal_type verbose = 0) {
-        Kokkos::Impl::Timer timer;
+        Kokkos::Timer timer;
         double t_scotch = 0;
 
         _verbose = verbose;

@@ -6,11 +6,8 @@
 // ****************************************************************************
 // @HEADER
 
-#include "Teuchos_UnitTestHarness.hpp"
+#include "Tempus_UnitTest_RK_Utils.hpp"
 
-#include "Tempus_UnitTest_Utils.hpp"
-
-#include "../TestModels/SinCosModel.hpp"
 
 namespace Tempus_Unit_Test {
 
@@ -24,7 +21,11 @@ using Teuchos::rcp_dynamic_cast;
 // ************************************************************
 TEUCHOS_UNIT_TEST(ERK_4Stage4thOrder, Default_Construction)
 {
-  testExplicitRKAccessorsFullConstruction("RK Explicit 4 Stage");
+  auto stepper = rcp(new Tempus::StepperERK_4Stage4thOrder<double>());
+  testExplicitRKAccessorsFullConstruction(stepper);
+
+  // Test stepper properties.
+  TEUCHOS_ASSERT(stepper->getOrder() == 4);
 }
 
 
@@ -41,7 +42,9 @@ TEUCHOS_UNIT_TEST(ERK_4Stage4thOrder, StepperFactory_Construction)
 // ************************************************************
 TEUCHOS_UNIT_TEST(ERK_4Stage4thOrder, AppAction)
 {
-  testRKAppAction("RK Explicit 4 Stage", out, success);
+  auto stepper = rcp(new Tempus::StepperERK_4Stage4thOrder<double>());
+  auto model = rcp(new Tempus_Test::SinCosModel<double>());
+  testRKAppAction(stepper, model, out, success);
 }
 
 

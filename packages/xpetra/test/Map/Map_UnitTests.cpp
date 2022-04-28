@@ -181,7 +181,7 @@ namespace {
       reduceAll( *comm, Teuchos::REDUCE_SUM, success ? 0 : 1, Teuchos::outArg(globalSuccess_int) );
       TEST_EQUALITY_CONST( globalSuccess_int, 0 );
 
-      TEST_EQUALITY(m.getNodeNumElements(), Teuchos::as<size_t>(numDofsPerProc));
+      TEST_EQUALITY(m.getLocalNumElements(), Teuchos::as<size_t>(numDofsPerProc));
 
       // All procs fail if any proc fails
       globalSuccess_int = -1;
@@ -223,7 +223,7 @@ namespace {
       reduceAll( *comm, Teuchos::REDUCE_SUM, success ? 0 : 1, Teuchos::outArg(globalSuccess_int) );
       TEST_EQUALITY_CONST( globalSuccess_int, 0 );
 
-      TEST_EQUALITY(m.getNodeNumElements(), Teuchos::as<size_t>(numDofsPerProc));
+      TEST_EQUALITY(m.getLocalNumElements(), Teuchos::as<size_t>(numDofsPerProc));
 
       // All procs fail if any proc fails
       globalSuccess_int = -1;
@@ -277,7 +277,7 @@ namespace {
       reduceAll( *comm, Teuchos::REDUCE_SUM, success ? 0 : 1, Teuchos::outArg(globalSuccess_int) );
       TEST_EQUALITY_CONST( globalSuccess_int, 0 );
 
-      TEST_EQUALITY(m.getNodeNumElements(), Teuchos::as<size_t>(numDofsPerProc));
+      TEST_EQUALITY(m.getLocalNumElements(), Teuchos::as<size_t>(numDofsPerProc));
 
       // All procs fail if any proc fails
       globalSuccess_int = -1;
@@ -322,7 +322,7 @@ namespace {
       reduceAll( *comm, Teuchos::REDUCE_SUM, success ? 0 : 1, Teuchos::outArg(globalSuccess_int) );
       TEST_EQUALITY_CONST( globalSuccess_int, 0 );
 
-      TEST_EQUALITY(m.getNodeNumElements(), Teuchos::as<size_t>(numDofsPerProc));
+      TEST_EQUALITY(m.getLocalNumElements(), Teuchos::as<size_t>(numDofsPerProc));
 
       // All procs fail if any proc fails
       globalSuccess_int = -1;
@@ -554,6 +554,10 @@ namespace {
   {
 #ifdef HAVE_XPETRA_KOKKOS_REFACTOR
 #ifdef HAVE_XPETRA_TPETRA  // Note: get Kokkos interface for Epetra is only available if Tpetra is also enabled!
+    typedef typename N::device_type device_type;
+    typedef typename device_type::execution_space execution_space;
+    typedef Kokkos::RangePolicy<execution_space, int> range_type;
+
     // create a comm
     auto comm = getDefaultComm();
     const auto numProcs = comm->getSize();
@@ -576,9 +580,16 @@ namespace {
       M m(numDofsPerProc*numProcs, 0/*indexBase*/, comm);
       auto localMap = m.getLocalMap();
 
-      TEST_EQUALITY(localMap.getNodeNumElements(), numDofsPerProc);
-      for (int i = 0; i < numDofsPerProc; i++)
-        TEST_EQUALITY(localMap.getGlobalElement(i), offset + i);
+      TEST_EQUALITY(localMap.getLocalNumElements(), numDofsPerProc);
+      for (int i = 0; i < numDofsPerProc; i++) {
+        // localMap.getGlobalElement is device only
+        GO globalElement;
+        Kokkos::parallel_reduce("read GO element", range_type (0, 1),
+          KOKKOS_LAMBDA(int dummy, GO& ge) {
+            ge = localMap.getGlobalElement(i);
+          }, globalElement);
+        TEST_EQUALITY(globalElement, offset + i);
+      }
     }
     {
       // Permuted map
@@ -595,9 +606,16 @@ namespace {
       M m(INVALID, elementList, indexBase, comm);
       auto localMap = m.getLocalMap();
 
-      TEST_EQUALITY(localMap.getNodeNumElements(), numDofsPerProc);
-      for (int i = 0; i < numDofsPerProc; i++)
-        TEST_EQUALITY(localMap.getGlobalElement(i), elementList[i]);
+      TEST_EQUALITY(localMap.getLocalNumElements(), numDofsPerProc);
+      for (int i = 0; i < numDofsPerProc; i++) {
+        // localMap.getGlobalElement is device only
+        GO globalElement;
+        Kokkos::parallel_reduce("read GO element", range_type (0, 1),
+          KOKKOS_LAMBDA(int dummy, GO& ge) {
+            ge = localMap.getGlobalElement(i);
+          }, globalElement);
+        TEST_EQUALITY(globalElement, elementList[i]);
+      }
     }
     {
       // Sparse map
@@ -614,9 +632,16 @@ namespace {
       M m(INVALID, elementList, indexBase, comm);
       auto localMap = m.getLocalMap();
 
-      TEST_EQUALITY(localMap.getNodeNumElements(), numDofsPerProc);
-      for (int i = 0; i < numDofsPerProc; i++)
-        TEST_EQUALITY(localMap.getGlobalElement(i), elementList[i]);
+      TEST_EQUALITY(localMap.getLocalNumElements(), numDofsPerProc);
+      for (int i = 0; i < numDofsPerProc; i++) {
+        // localMap.getGlobalElement is device only
+        GO globalElement;
+        Kokkos::parallel_reduce("read GO element", range_type (0, 1),
+          KOKKOS_LAMBDA(int dummy, GO& ge) {
+            ge = localMap.getGlobalElement(i);
+          }, globalElement);
+        TEST_EQUALITY(globalElement, elementList[i]);
+      }
     }
 #endif
 #endif
@@ -676,7 +701,7 @@ namespace {
     TEST_EQUALITY_CONST(map.isContiguous(), true);
     TEST_EQUALITY_CONST(map.isDistributed(), numImages > 1);
     TEST_EQUALITY(map.getGlobalNumElements(), numGlobalEntries);
-    TEST_EQUALITY_CONST(map.getNodeNumElements(), 2);
+    TEST_EQUALITY_CONST(map.getLocalNumElements(), 2);
     TEST_EQUALITY_CONST(map.getIndexBase(), indexBase);
     TEST_EQUALITY_CONST(map.getMinLocalIndex(), indexBase);
     TEST_EQUALITY_CONST(map.getMaxLocalIndex(), 1);
@@ -691,7 +716,7 @@ namespace {
     TEST_EQUALITY( map.getLocalElement(numGlobalEntries), Teuchos::OrdinalTraits<LO>::invalid() );
     TEST_EQUALITY( map.getGlobalElement(2),               Teuchos::OrdinalTraits<GO>::invalid() );
     TEST_EQUALITY( map.getLocalElement(numGlobalEntries-1), myImageID == numImages-1 ? 1 : Teuchos::OrdinalTraits<LO>::invalid() );
-    TEST_COMPARE_ARRAYS( map.getNodeElementList(), myGlobal);
+    TEST_COMPARE_ARRAYS( map.getLocalElementList(), myGlobal);
     TEST_EQUALITY_CONST( map.isNodeLocalElement(0), true );
     TEST_EQUALITY_CONST( map.isNodeLocalElement(1), true );
     TEST_EQUALITY_CONST( map.isNodeLocalElement(2), false ); // just try a couple

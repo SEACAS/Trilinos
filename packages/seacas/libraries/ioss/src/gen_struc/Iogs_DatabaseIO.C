@@ -1,34 +1,8 @@
-// Copyright(C) 1999-2017, 2020 National Technology & Engineering Solutions
+// Copyright(C) 1999-2020, 2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
 #include "Ioss_CommSet.h"         // for CommSet
 #include "Ioss_DBUsage.h"         // for DatabaseUsage
@@ -118,7 +92,7 @@ namespace {
 
   void fill_constant_data(const Ioss::Field &field, void *data, double value)
   {
-    auto * rdata           = reinterpret_cast<double *>(data);
+    auto  *rdata           = reinterpret_cast<double *>(data);
     size_t count           = field.raw_count();
     size_t component_count = field.raw_storage()->component_count();
     for (size_t i = 0; i < count * component_count; i++) {
@@ -138,7 +112,7 @@ namespace Iogs {
   IOFactory::IOFactory() : Ioss::IOFactory("gen_struc") {}
 
   Ioss::DatabaseIO *IOFactory::make_IO(const std::string &filename, Ioss::DatabaseUsage db_usage,
-                                       MPI_Comm                     communicator,
+                                       Ioss_MPI_Comm                communicator,
                                        const Ioss::PropertyManager &props) const
   {
     return new DatabaseIO(nullptr, filename, db_usage, communicator, props);
@@ -146,7 +120,7 @@ namespace Iogs {
 
   // ========================================================================
   DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
-                         Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
+                         Ioss::DatabaseUsage db_usage, Ioss_MPI_Comm communicator,
                          const Ioss::PropertyManager &props)
       : Ioss::DatabaseIO(region, filename, db_usage, communicator, props)
   {
@@ -280,7 +254,7 @@ namespace Iogs {
     int                   zone = sb->get_property("zone").get_int();
 
     int64_t num_to_get = field.verify(data_size);
-    auto *  rdata      = static_cast<double *>(data);
+    auto   *rdata      = static_cast<double *>(data);
 
     if (role == Ioss::Field::MESH) {
       if (field.get_name() == "mesh_model_coordinates_x") {
@@ -332,13 +306,13 @@ namespace Iogs {
     return num_to_get;
   }
 
-  int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *ef_blk, const Ioss::Field &field,
+  int64_t DatabaseIO::get_field_internal(const Ioss::SideBlock *sd_blk, const Ioss::Field &field,
                                          void *data, size_t data_size) const
   {
     size_t num_to_get = field.verify(data_size);
 
-    int64_t id           = ef_blk->get_property("id").get_int();
-    size_t  entity_count = ef_blk->entity_count();
+    int64_t id           = sd_blk->get_property("id").get_int();
+    size_t  entity_count = sd_blk->entity_count();
     if (num_to_get != entity_count) {
       std::ostringstream errmsg;
       errmsg << "ERROR: Partial field input not implemented for side blocks";
@@ -400,10 +374,10 @@ namespace Iogs {
 
       else if (field.get_name() == "distribution_factors") {
         if (m_useVariableDf) {
-          const Ioss::Field &id_fld = ef_blk->get_fieldref("ids");
+          const Ioss::Field &id_fld = sd_blk->get_fieldref("ids");
           std::vector<char>  ids(id_fld.get_size());
-          get_field_internal(ef_blk, id_fld, ids.data(), id_fld.get_size());
-          fill_transient_data(ef_blk, field, data, ids.data(), num_to_get);
+          get_field_internal(sd_blk, id_fld, ids.data(), id_fld.get_size());
+          fill_transient_data(sd_blk, field, data, ids.data(), num_to_get);
         }
         else {
           fill_constant_data(field, data, 1.0);
@@ -411,14 +385,14 @@ namespace Iogs {
       }
 
       else {
-        num_to_get = Ioss::Utils::field_warning(ef_blk, field, "input");
+        num_to_get = Ioss::Utils::field_warning(sd_blk, field, "input");
       }
     }
     else if (role == Ioss::Field::TRANSIENT) {
-      const Ioss::Field &id_fld = ef_blk->get_fieldref("ids");
+      const Ioss::Field &id_fld = sd_blk->get_fieldref("ids");
       std::vector<char>  ids(id_fld.get_size());
-      get_field_internal(ef_blk, id_fld, ids.data(), id_fld.get_size());
-      fill_transient_data(ef_blk, field, data, ids.data(), num_to_get, currentTime);
+      get_field_internal(sd_blk, id_fld, ids.data(), id_fld.get_size());
+      fill_transient_data(sd_blk, field, data, ids.data(), num_to_get, currentTime);
     }
     return num_to_get;
   }
@@ -592,7 +566,7 @@ namespace Iogs {
   {
     return -1;
   }
-  int64_t DatabaseIO::put_field_internal(const Ioss::SideBlock * /*fb*/,
+  int64_t DatabaseIO::put_field_internal(const Ioss::SideBlock * /*sb*/,
                                          const Ioss::Field & /*field*/, void * /*data*/,
                                          size_t /*data_size*/) const
   {
@@ -679,50 +653,50 @@ namespace Iogs {
 
       std::vector<std::string> touching_blocks = m_generatedMesh->sideset_touching_blocks(ifs + 1);
       if (touching_blocks.size() == 1) {
-        std::string ef_block_name  = name + "_quad4";
+        std::string sd_block_name  = name + "_quad4";
         std::string side_topo_name = "quad4";
         std::string elem_topo_name = "unknown";
         int64_t     number_faces   = m_generatedMesh->sideset_side_count_proc(ifs + 1);
 
-        auto ef_block =
-            new Ioss::SideBlock(this, ef_block_name, side_topo_name, elem_topo_name, number_faces);
-        sideset->add(ef_block);
-        ef_block->property_add(Ioss::Property("id", ifs + 1));
-        ef_block->property_add(Ioss::Property("guid", util().generate_guid(ifs + 1)));
+        auto sd_block =
+            new Ioss::SideBlock(this, sd_block_name, side_topo_name, elem_topo_name, number_faces);
+        sideset->add(sd_block);
+        sd_block->property_add(Ioss::Property("id", ifs + 1));
+        sd_block->property_add(Ioss::Property("guid", util().generate_guid(ifs + 1)));
 
         std::string storage = "Real[";
         storage += std::to_string(4);
         storage += "]";
-        ef_block->field_add(Ioss::Field("distribution_factors", Ioss::Field::REAL, storage,
+        sd_block->field_add(Ioss::Field("distribution_factors", Ioss::Field::REAL, storage,
                                         Ioss::Field::MESH, number_faces));
 
         Ioss::ElementBlock *el_block = get_region()->get_element_block(touching_blocks[0]);
-        ef_block->set_parent_element_block(el_block);
-        add_transient_fields(ef_block);
+        sd_block->set_parent_element_block(el_block);
+        add_transient_fields(sd_block);
       }
       else {
         for (auto &touching_block : touching_blocks) {
-          std::string ef_block_name =
+          std::string sd_block_name =
               "surface_" + touching_block + "_edge2_" + std::to_string(ifs + 1);
           std::string side_topo_name = "quad4";
           std::string elem_topo_name = "unknown";
           int64_t     number_faces   = m_generatedMesh->sideset_side_count_proc(ifs + 1);
 
-          auto ef_block = new Ioss::SideBlock(this, ef_block_name, side_topo_name, elem_topo_name,
+          auto sd_block = new Ioss::SideBlock(this, sd_block_name, side_topo_name, elem_topo_name,
                                               number_faces);
-          sideset->add(ef_block);
-          ef_block->property_add(Ioss::Property("id", ifs + 1));
-          ef_block->property_add(Ioss::Property("guid", util().generate_guid(ifs + 1)));
+          sideset->add(sd_block);
+          sd_block->property_add(Ioss::Property("id", ifs + 1));
+          sd_block->property_add(Ioss::Property("guid", util().generate_guid(ifs + 1)));
 
           std::string storage = "Real[";
           storage += std::to_string(4);
           storage += "]";
-          ef_block->field_add(Ioss::Field("distribution_factors", Ioss::Field::REAL, storage,
+          sd_block->field_add(Ioss::Field("distribution_factors", Ioss::Field::REAL, storage,
                                           Ioss::Field::MESH, number_faces));
 
           Ioss::ElementBlock *el_block = get_region()->get_element_block(touching_block);
-          ef_block->set_parent_element_block(el_block);
-          add_transient_fields(ef_block);
+          sd_block->set_parent_element_block(el_block);
+          add_transient_fields(sd_block);
         }
       }
     }

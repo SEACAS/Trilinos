@@ -175,12 +175,7 @@ TRIBITS_ADD_OPTION_AND_DEFINE(XPETRA_ENABLE_PROFILING
   OFF)
 
 # Define option to enable code that is refactored to use Kokkos
-# This is ON by default when Kokkos is enabled.
-IF (${PACKAGE_NAME}_ENABLE_KokkosCore)
-  SET(Kokkos_Refactor_On_By_Default ON)
-ELSE()
-  SET(Kokkos_Refactor_On_By_Default OFF)
-ENDIF()
+SET(Kokkos_Refactor_On_By_Default ON)
 
 TRIBITS_ADD_OPTION_AND_DEFINE(
   ${PACKAGE_NAME}_ENABLE_Kokkos_Refactor
@@ -195,6 +190,11 @@ TRIBITS_ADD_OPTION_AND_DEFINE(
 ADD_SUBDIRECTORY(src)
 ADD_SUBDIRECTORY(sup)
 
+IF (IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/doc
+    AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/doc/CMakeLists.txt)
+  ADD_SUBDIRECTORY(doc)
+ENDIF()
+
 TRIBITS_ADD_EXAMPLE_DIRECTORIES(example)
 TRIBITS_ADD_EXAMPLE_DIRECTORIES(research)
 TRIBITS_ADD_TEST_DIRECTORIES(test)
@@ -204,10 +204,6 @@ TRIBITS_ADD_TEST_DIRECTORIES(test)
 #
 
 TRIBITS_EXCLUDE_AUTOTOOLS_FILES()
-
-TRIBITS_EXCLUDE_FILES(
-  test/BlockedCrsOperator
-  )
 
 #
 # D) Do standard postprocessing

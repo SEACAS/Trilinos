@@ -119,58 +119,103 @@ namespace Tpetra {
   template<class Scalar, class LO, class GO, class Node>
   bool
   BlockVector<Scalar, LO, GO, Node>::
-  replaceLocalValues (const LO localRowIndex, const Scalar vals[]) const {
-    return ((const base_type*) this)->replaceLocalValues (localRowIndex, 0, vals);
+  replaceLocalValues (const LO localRowIndex, const Scalar vals[]) {
+    return ((base_type*) this)->replaceLocalValues (localRowIndex, 0, vals);
   }
 
   template<class Scalar, class LO, class GO, class Node>
   bool
   BlockVector<Scalar, LO, GO, Node>::
-  replaceGlobalValues (const GO globalRowIndex, const Scalar vals[]) const {
-    return ((const base_type*) this)->replaceGlobalValues (globalRowIndex, 0, vals);
+  replaceGlobalValues (const GO globalRowIndex, const Scalar vals[]) {
+    return ((base_type*) this)->replaceGlobalValues (globalRowIndex, 0, vals);
   }
 
   template<class Scalar, class LO, class GO, class Node>
   bool
   BlockVector<Scalar, LO, GO, Node>::
-  sumIntoLocalValues (const LO localRowIndex, const Scalar vals[]) const {
-    return ((const base_type*) this)->sumIntoLocalValues (localRowIndex, 0, vals);
+  sumIntoLocalValues (const LO localRowIndex, const Scalar vals[]) {
+    return ((base_type*) this)->sumIntoLocalValues (localRowIndex, 0, vals);
   }
 
   template<class Scalar, class LO, class GO, class Node>
   bool
   BlockVector<Scalar, LO, GO, Node>::
-  sumIntoGlobalValues (const GO globalRowIndex, const Scalar vals[]) const {
-    return ((const base_type*) this)->sumIntoLocalValues (globalRowIndex, 0, vals);
+  sumIntoGlobalValues (const GO globalRowIndex, const Scalar vals[]) {
+    return ((base_type*) this)->sumIntoLocalValues (globalRowIndex, 0, vals);
   }
 
+#ifdef TPETRA_ENABLE_DEPRECATED_CODE
   template<class Scalar, class LO, class GO, class Node>
+  TPETRA_DEPRECATED
   bool
   BlockVector<Scalar, LO, GO, Node>::
-  getLocalRowView (const LO localRowIndex, Scalar*& vals) const {
-    return ((const base_type*) this)->getLocalRowView (localRowIndex, 0, vals);
+  getLocalRowView (const LO localRowIndex, Scalar*& vals) {
+    if (! this->meshMap_.isNodeLocalElement (localRowIndex)) {
+      return false;
+    } else {
+      auto X_ij = getLocalBlockHost (localRowIndex, Access::ReadWrite);
+      vals = reinterpret_cast<Scalar*> (X_ij.data ());
+      return true;
+    }
   }
 
   template<class Scalar, class LO, class GO, class Node>
+  TPETRA_DEPRECATED
   bool
   BlockVector<Scalar, LO, GO, Node>::
-  getGlobalRowView (const GO globalRowIndex, Scalar*& vals) const {
-    return ((const base_type*) this)->getGlobalRowView (globalRowIndex, 0, vals);
+  getGlobalRowView (const GO globalRowIndex, Scalar*& vals) {
+    const LO localRowIndex = this->meshMap_.getLocalElement (globalRowIndex);
+    if (localRowIndex == Teuchos::OrdinalTraits<LO>::invalid ()) {
+      return false;
+    } else {
+      auto X_ij = getLocalBlockHost (localRowIndex, Access::ReadWrite);
+      vals = reinterpret_cast<Scalar*> (X_ij.data ());
+      return true;
+    }
   }
 
   template<class Scalar, class LO, class GO, class Node>
-  typename BlockVector<Scalar, LO, GO, Node>::little_vec_type
+  TPETRA_DEPRECATED
+  typename BlockVector<Scalar, LO, GO, Node>::little_host_vec_type
   BlockVector<Scalar, LO, GO, Node>::
-  getLocalBlock (const LO localRowIndex) const
+  getLocalBlock (const LO localRowIndex)
   {
     if (! this->isValidLocalMeshIndex (localRowIndex)) {
-      return little_vec_type ();
+      return little_host_vec_type ();
     }
     else {
       const size_t blockSize = this->getBlockSize ();
       const size_t offset = localRowIndex * blockSize;
-      return little_vec_type (this->getRawPtr () + offset, blockSize);
+      return little_host_vec_type (this->getRawPtr () + offset, blockSize);
     }
+  }
+#endif // TPETRA_ENABLE_DEPRECATED_CODE
+
+  template<class Scalar, class LO, class GO, class Node>
+  typename BlockVector<Scalar, LO, GO, Node>::const_little_host_vec_type
+  BlockVector<Scalar, LO, GO, Node>::
+  getLocalBlockHost (const LO localRowIndex, Access::ReadOnlyStruct) const
+  {
+    return ((const base_type*) this)->getLocalBlockHost(localRowIndex, 0, 
+                                                        Access::ReadOnly);
+  }
+
+  template<class Scalar, class LO, class GO, class Node>
+  typename BlockVector<Scalar, LO, GO, Node>::little_host_vec_type
+  BlockVector<Scalar, LO, GO, Node>::
+  getLocalBlockHost (const LO localRowIndex, Access::ReadWriteStruct)
+  {
+    return ((base_type*) this)->getLocalBlockHost(localRowIndex, 0, 
+                                                  Access::ReadWrite);
+  }
+
+  template<class Scalar, class LO, class GO, class Node>
+  typename BlockVector<Scalar, LO, GO, Node>::little_host_vec_type
+  BlockVector<Scalar, LO, GO, Node>::
+  getLocalBlockHost (const LO localRowIndex, Access::OverwriteAllStruct)
+  {
+    return ((base_type*) this)->getLocalBlockHost(localRowIndex, 0, 
+                                                  Access::OverwriteAll);
   }
 
 } // namespace Tpetra

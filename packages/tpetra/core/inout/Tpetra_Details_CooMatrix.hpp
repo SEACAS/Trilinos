@@ -1005,7 +1005,8 @@ protected:
    const Kokkos::DualView<const LO*,
      buffer_device_type>& permuteToLIDs,
    const Kokkos::DualView<const LO*,
-     buffer_device_type>& permuteFromLIDs)
+     buffer_device_type>& permuteFromLIDs,
+   const CombineMode /* CM */)
   {
     using std::endl;
     using this_type = CooMatrix<SC, LO, GO, NT>;
@@ -1208,8 +1209,7 @@ protected:
      buffer_device_type>& exports,
    Kokkos::DualView<size_t*,
      buffer_device_type> numPacketsPerLID,
-   size_t& constantNumPackets,
-   ::Tpetra::Distributor& /* distor */)
+   size_t& constantNumPackets)
   {
     using Teuchos::Comm;
     using Teuchos::RCP;
@@ -1405,7 +1405,6 @@ protected:
    Kokkos::DualView<size_t*,
      buffer_device_type> numPacketsPerLID,
    const size_t /* constantNumPackets */,
-   ::Tpetra::Distributor& /* distor */,
    const ::Tpetra::CombineMode /* combineMode */)
   {
     using Teuchos::Comm;

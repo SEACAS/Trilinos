@@ -86,7 +86,7 @@ namespace panzer
     numGradDims_(ir.dl_vector->extent(2)),
     basisName_(basis.name())
   {
-    using Kokkos::View;
+    using PHX::View;
     using panzer::BASIS;
     using panzer::Cell;
     using panzer::EvaluatorStyle;
@@ -137,26 +137,26 @@ namespace panzer
 
     // Create the fields that we're either contributing to or evaluating
     // (storing).
-    fields_ = Kokkos::View<PHX::MDField<ScalarT, Cell, BASIS>*>("Integrator_GradBasisCrossVector::fields_", resNames.size());
-
+    fields_host_ = typename OuterView::HostMirror("Integrator_GradBasisCrossVector::fields_", resNames.size());
+    fields_ = OuterView("Integrator_GradBasisCrossVector::fields_", resNames.size());
     {
       int i=0;
       for (const auto& name : resNames)
-        fields_(i++) = MDField<ScalarT, Cell, BASIS>(name, basis.functional);
+        fields_host_(i++) = PHX::View<ScalarT**>(name, basis.functional->extent(0),basis.functional->extent(1));
     } // end loop over resNames
+    Kokkos::deep_copy(fields_,fields_host_);
     for (std::size_t i=0; i< fields_.extent(0); ++i) {
-      const auto& field = fields_(i);
+      const auto& field = fields_host_(i);
+      PHX::Tag<ScalarT> tag(resNames[i],basis.functional);
       if (evalStyle_ == EvaluatorStyle::CONTRIBUTES)
-        this->addContributedField(field);
+        this->addContributedField(tag,field);
       else // if (evalStyle_ == EvaluatorStyle::EVALUATES)
-        this->addEvaluatedField(field);
+        this->addEvaluatedField(tag,field);
     }
     // Add the dependent field multipliers, if there are any.
     int i = 0;
     fieldMults_.resize(fmNames.size());
-    kokkosFieldMults_ = View<View<const ScalarT**,
-      typename DevLayout<ScalarT>::type, Device>*>(
-      "GradBasisCrossVector::KokkosFieldMultipliers", fmNames.size());
+    kokkosFieldMults_ = View<View<const ScalarT**>*>("GradBasisCrossVector::KokkosFieldMultipliers", fmNames.size());
     for (const auto& name : fmNames)
     {
       fieldMults_[i++] = MDField<const ScalarT, Cell, IP>(name, ir.dl_scalar);
@@ -170,9 +170,9 @@ namespace panzer
     else // if (evalStyle_ == EvaluatorStyle::EVALUATES)
       n += "EVALUATES";
     n += "):  {";
-    for (size_t j=0; j < fields_.extent(0) - 1; ++j)
-      n += fields_[j].fieldTag().name() + ", ";
-    n += fields_(fields_.extent(0)-1).fieldTag().name() + "}";
+    for (size_t j=0; j < fields_host_.extent(0) - 1; ++j)
+      n += resNames[j] + ", ";
+    n += resNames[resNames.size()-1] + "}";
     this->setName(n);
   } // end of Constructor
 
@@ -223,12 +223,10 @@ namespace panzer
   {
     using Kokkos::createDynRankView;
     using panzer::getBasisIndex;
-    using PHX::Device;
 
-    // Get the Kokkos::Views of the field multipliers.
+    // Get the PHX::Views of the field multipliers.
     for (size_t i(0); i < fieldMults_.size(); ++i)
       kokkosFieldMults_(i) = fieldMults_[i].get_static_view();
-    Device().fence();
 
     // Determine the index in the Workset bases for our particular basis name.
     basisIndex_ = getBasisIndex(basisName_, (*sd.worksets_)[0], this->wda);

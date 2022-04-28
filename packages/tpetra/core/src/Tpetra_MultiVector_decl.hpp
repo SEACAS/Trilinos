@@ -44,18 +44,13 @@
 
 /// \file Tpetra_MultiVector_decl.hpp
 /// \brief Declaration of the Tpetra::MultiVector class
-///
-/// If you want to use Tpetra::MultiVector, include
-/// "Tpetra_MultiVector.hpp" (a file which CMake generates and
-/// installs for you).  If you only want the declaration of
-/// Tpetra::MultiVector, include this file
-/// (Tpetra_MultiVector_decl.hpp).
 
 #include "Tpetra_MultiVector_fwd.hpp"
 #include "Tpetra_Vector_fwd.hpp"
 #include "Tpetra_FEMultiVector_fwd.hpp"
 #include "Tpetra_DistObject.hpp"
 #include "Tpetra_Map_fwd.hpp"
+#include "Tpetra_Details_Behavior.hpp"
 #include "Kokkos_DualView.hpp"
 #include "Teuchos_BLAS_types.hpp"
 #include "Teuchos_DataAccess.hpp"
@@ -63,6 +58,8 @@
 #include "Kokkos_ArithTraits.hpp"
 #include "Kokkos_InnerProductSpaceTraits.hpp"
 #include "Tpetra_KokkosRefactor_Details_MultiVectorLocalDeepCopy.hpp"
+#include "Tpetra_Access.hpp"
+#include "Tpetra_Details_WrappedDualView.hpp"
 #include <type_traits>
 
 #ifdef HAVE_TPETRACORE_TEUCHOSNUMERICS
@@ -73,6 +70,7 @@ namespace Teuchos {
 }
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 #endif // HAVE_TPETRACORE_TEUCHOSNUMERICS
+
 
 namespace Tpetra {
 
@@ -158,6 +156,14 @@ namespace Tpetra {
   template<class SC, class LO, class GO, class NT>
   Teuchos::ArrayView<const size_t>
   getMultiVectorWhichVectors (const MultiVector<SC, LO, GO, NT>& X);
+
+#ifdef TPETRA_ENABLE_DEPRECATED_CODE
+  // Forward definition needed for friending BlockMultiVector
+  // Need to friend it to prevent BlockMultiVector from issuing
+  // deprecation warnings.
+  template<class Scalar, class LO, class GO, class Node>
+  class BlockMultiVector;
+#endif
 
   /// \brief One or more distributed dense vectors.
   ///
@@ -466,7 +472,11 @@ namespace Tpetra {
     /// execution_space's execution space.
     using dual_view_type = Kokkos::DualView<impl_scalar_type**,
                                             Kokkos::LayoutLeft,
-                                            execution_space>;
+                                            device_type>;
+    using wrapped_dual_view_type = Details::WrappedDualView<dual_view_type>;
+
+    using host_view_type = typename dual_view_type::t_host;
+    using device_view_type = typename dual_view_type::t_dev;
 
     //@}
     //! @name Constructors and destructor
@@ -590,7 +600,7 @@ namespace Tpetra {
     /// around with multiple memory spaces.
     MultiVector (const Teuchos::RCP<const map_type>& map,
                  const typename dual_view_type::t_dev& d_view);
-
+   
     /// \brief Expert mode constructor, that takes a Kokkos::DualView
     ///   of the MultiVector's data and the "original"
     ///   Kokkos::DualView of the data, and returns a MultiVector that
@@ -616,6 +626,18 @@ namespace Tpetra {
     MultiVector (const Teuchos::RCP<const map_type>& map,
                  const dual_view_type& view,
                  const dual_view_type& origView);
+
+    /// \brief Expert mode constructor, that takes a WrappedDualView
+    ///   of the MultiVector's data.
+    ///
+    /// \warning This constructor is only for expert users.  We make
+    ///   no promises about backwards compatibility for this
+    ///   interface.  It may change or go away at any time.  It is
+    ///   mainly useful for Tpetra developers and we do not expect it
+    ///   to be useful for anyone else.
+    MultiVector (const Teuchos::RCP<const map_type>& map,
+                 const wrapped_dual_view_type& d_view);
+
 
   protected:
 
@@ -648,6 +670,28 @@ namespace Tpetra {
     MultiVector (const Teuchos::RCP<const map_type>& map,
                  const dual_view_type& view,
                  const Teuchos::ArrayView<const size_t>& whichVectors);
+
+    /// \brief Expert mode constructor for noncontiguous views.
+    ///
+    /// \warning This constructor is only for expert users.  We make
+    ///   no promises about backwards compatibility for this
+    ///   interface.  It may change or go away at any time.  It is
+    ///   mainly useful for Tpetra developers and we do not expect it
+    ///   to be useful for anyone else.
+    ///
+    /// This constructor takes a Kokkos::DualView for the MultiVector
+    /// to view, and a list of the columns to view, and returns a
+    /// MultiVector that views those data.  The resulting MultiVector
+    /// does <i>not</i> have constant stride, that is,
+    /// isConstantStride() returns false.
+    ///
+    /// \param map [in] Map describing the distribution of rows.
+    /// \param view [in] WrappedDualView to the data (shallow copy).
+    /// \param whichVectors [in] Which columns (vectors) to view.
+    MultiVector (const Teuchos::RCP<const map_type>& map,
+                 const wrapped_dual_view_type& view,
+                 const Teuchos::ArrayView<const size_t>& whichVectors);
+
 
     /// \brief Expert mode constructor for noncontiguous views, with
     ///   original view.
@@ -823,8 +867,9 @@ namespace Tpetra {
     /// must access the device View directly by calling
     /// getLocalView().  Please see modify(), sync(), and the
     /// discussion of DualView semantics elsewhere in the
-    /// documentation.  You are responsible for calling modify() and
-    /// sync(), if needed; this method doesn't do that.
+    /// documentation.
+    /// This method calls sync_host() before modifying
+    /// host data, and modify_host() afterwards.
     ///
     /// This method does not have an "atomic" option like
     /// sumIntoGlobalValue.  This is deliberate.  Replacement is not
@@ -842,7 +887,7 @@ namespace Tpetra {
     void
     replaceGlobalValue (const GlobalOrdinal gblRow,
                         const size_t col,
-                        const impl_scalar_type& value) const;
+                        const impl_scalar_type& value);
 
     /// \brief Like the above replaceGlobalValue, but only enabled if
     ///   T differs from impl_scalar_type.
@@ -859,9 +904,9 @@ namespace Tpetra {
     /// and you want to modify the non-host version of the data, you
     /// must access the device View directly by calling getLocalView().
     /// Please see modify(), sync(), and the discussion of DualView
-    /// semantics elsewhere in the documentation.  You are responsible
-    /// for calling modify() and sync(), if needed; this method
-    /// doesn't do that.
+    /// semantics elsewhere in the documentation.
+    /// This method calls sync_host() before modifying
+    /// host data, and modify_host() afterwards.
     ///
     /// This method does not have an "atomic" option like
     /// sumIntoGlobalValue.  This is deliberate.  Replacement is not
@@ -880,7 +925,7 @@ namespace Tpetra {
     typename std::enable_if<! std::is_same<T, impl_scalar_type>::value && std::is_convertible<T, impl_scalar_type>::value, void>::type
     replaceGlobalValue (GlobalOrdinal globalRow,
                         size_t col,
-                        const T& value) const
+                        const T& value)
     {
       replaceGlobalValue (globalRow, col, static_cast<impl_scalar_type> (value));
     }
@@ -897,8 +942,9 @@ namespace Tpetra {
     /// must access the device View directly by calling
     /// getLocalView().  Please see modify(), sync(), and the
     /// discussion of DualView semantics elsewhere in the
-    /// documentation.  You are responsible for calling modify() and
-    /// sync(), if needed; this method doesn't do that.
+    /// documentation.
+    /// This method calls sync_host() before modifying
+    /// host data, and modify_host() afterwards.
     ///
     /// \param gblRow [in] Global row index of the entry to modify.
     ///   This <i>must</i> be a valid global row index on the calling
@@ -912,7 +958,7 @@ namespace Tpetra {
     sumIntoGlobalValue (const GlobalOrdinal gblRow,
                         const size_t col,
                         const impl_scalar_type& value,
-                        const bool atomic = useAtomicUpdatesByDefault) const;
+                        const bool atomic = useAtomicUpdatesByDefault);
 
     /// \brief Like the above sumIntoGlobalValue, but only enabled if
     ///   T differs from impl_scalar_type.
@@ -930,8 +976,9 @@ namespace Tpetra {
     /// must access the device View directly by calling
     /// getLocalView().  Please see modify(), sync(), and the
     /// discussion of DualView semantics elsewhere in the
-    /// documentation.  You are responsible for calling modify() and
-    /// sync(), if needed; this method doesn't do that.
+    /// documentation.
+    /// This method calls sync_host() before modifying
+    /// host data, and modify_host() afterwards.
     ///
     /// \param gblRow [in] Global row index of the entry to modify.
     ///   This <i>must</i> be a valid global row index on the calling
@@ -946,7 +993,7 @@ namespace Tpetra {
     sumIntoGlobalValue (const GlobalOrdinal gblRow,
                         const size_t col,
                         const T& val,
-                        const bool atomic = useAtomicUpdatesByDefault) const
+                        const bool atomic = useAtomicUpdatesByDefault)
     {
       sumIntoGlobalValue (gblRow, col, static_cast<impl_scalar_type> (val), atomic);
     }
@@ -963,8 +1010,9 @@ namespace Tpetra {
     /// must access the device View directly by calling
     /// getLocalView().  Please see modify(), sync(), and the
     /// discussion of DualView semantics elsewhere in the
-    /// documentation.  You are responsible for calling modify() and
-    /// sync(), if needed; this method doesn't do that.
+    /// documentation.
+    /// This method calls sync_host() before modifying
+    /// host data, and modify_host() afterwards.
     ///
     /// This method does not have an "atomic" option like
     /// sumIntoLocalValue.  This is deliberate.  Replacement is not
@@ -982,7 +1030,7 @@ namespace Tpetra {
     void
     replaceLocalValue (const LocalOrdinal lclRow,
                        const size_t col,
-                       const impl_scalar_type& value) const;
+                       const impl_scalar_type& value);
 
     /// \brief Like the above replaceLocalValue, but only enabled if
     ///   T differs from impl_scalar_type.
@@ -1000,8 +1048,9 @@ namespace Tpetra {
     /// must access the device View directly by calling
     /// getLocalView().  Please see modify(), sync(), and the
     /// discussion of DualView semantics elsewhere in the
-    /// documentation.  You are responsible for calling modify() and
-    /// sync(), if needed; this method doesn't do that.
+    /// documentation.
+    /// This method calls sync_host() before modifying
+    /// host data, and modify_host() afterwards.
     ///
     /// This method does not have an "atomic" option like
     /// sumIntoLocalValue.  This is deliberate.  Replacement is not
@@ -1020,7 +1069,7 @@ namespace Tpetra {
     typename std::enable_if<! std::is_same<T, impl_scalar_type>::value && std::is_convertible<T, impl_scalar_type>::value, void>::type
     replaceLocalValue (const LocalOrdinal lclRow,
                        const size_t col,
-                       const T& val) const
+                       const T& val)
     {
       replaceLocalValue (lclRow, col, static_cast<impl_scalar_type> (val));
     }
@@ -1037,8 +1086,9 @@ namespace Tpetra {
     /// must access the device View directly by calling
     /// getLocalView().  Please see modify(), sync(), and the
     /// discussion of DualView semantics elsewhere in the
-    /// documentation.  You are responsible for calling modify() and
-    /// sync(), if needed; this method doesn't do that.
+    /// documentation.
+    /// This method calls sync_host() before modifying
+    /// host data, and modify_host() afterwards.
     ///
     /// \param lclRow [in] Local row index of the entry to modify.
     ///   Must be a valid local index in this MultiVector's Map on the
@@ -1052,7 +1102,7 @@ namespace Tpetra {
     sumIntoLocalValue (const LocalOrdinal lclRow,
                        const size_t col,
                        const impl_scalar_type& val,
-                       const bool atomic = useAtomicUpdatesByDefault) const;
+                       const bool atomic = useAtomicUpdatesByDefault);
 
     /// \brief Like the above sumIntoLocalValue, but only enabled if
     ///   T differs from impl_scalar_type.
@@ -1070,8 +1120,9 @@ namespace Tpetra {
     /// must access the device View directly by calling
     /// getLocalView().  Please see modify(), sync(), and the
     /// discussion of DualView semantics elsewhere in the
-    /// documentation.  You are responsible for calling modify() and
-    /// sync(), if needed; this method doesn't do that.
+    /// documentation.
+    /// This method calls sync_host() before modifying
+    /// host data, and modify_host() afterwards.
     ///
     /// \param lclRow [in] Local row index of the entry to modify.
     /// \param col [in] Column index of the entry to modify.
@@ -1084,7 +1135,7 @@ namespace Tpetra {
     sumIntoLocalValue (const LocalOrdinal lclRow,
                        const size_t col,
                        const T& val,
-                       const bool atomic = useAtomicUpdatesByDefault) const
+                       const bool atomic = useAtomicUpdatesByDefault)
     {
       sumIntoLocalValue (lclRow, col, static_cast<impl_scalar_type> (val), atomic);
     }
@@ -1405,8 +1456,33 @@ namespace Tpetra {
     //! Return non-const persisting pointers to values.
     Teuchos::ArrayRCP<Teuchos::ArrayRCP<Scalar> > get2dViewNonConst ();
 
+    /// \brief Return a read-only, up-to-date view of this MultiVector's local data on host.
+    /// This requires that there are no live device-space views.
+    typename dual_view_type::t_host::const_type getLocalViewHost(Access::ReadOnlyStruct) const;
 
+    /// \brief Return a mutable, up-to-date view of this MultiVector's local data on host.
+    /// This requires that there are no live device-space views.
+    typename dual_view_type::t_host getLocalViewHost(Access::ReadWriteStruct);
+
+    /// \brief Return a mutable view of this MultiVector's local data on host, assuming all existing data will be overwritten.
+    /// This requires that there are no live device-space views.
+    typename dual_view_type::t_host getLocalViewHost(Access::OverwriteAllStruct);
+
+    /// \brief Return a read-only, up-to-date view of this MultiVector's local data on device.
+    /// This requires that there are no live host-space views.
+    typename dual_view_type::t_dev::const_type getLocalViewDevice(Access::ReadOnlyStruct) const;
+
+    /// \brief Return a mutable, up-to-date view of this MultiVector's local data on device.
+    /// This requires that there are no live host-space views.
+    typename dual_view_type::t_dev getLocalViewDevice(Access::ReadWriteStruct);
+
+    /// \brief Return a mutable view of this MultiVector's local data on device, assuming all existing data will be overwritten.
+    /// This requires that there are no live host-space views.
+    typename dual_view_type::t_dev getLocalViewDevice(Access::OverwriteAllStruct);
+
+#ifdef TPETRA_ENABLE_DEPRECATED_CODE
     //! Clear "modified" flags on both host and device sides.
+    TPETRA_DEPRECATED
     void clear_sync_state ();
 
     /// \brief Update data on device or host only if data in the other
@@ -1428,20 +1504,31 @@ namespace Tpetra {
     ///   it, by calling the modify() method with the appropriate
     ///   template parameter.
     template<class TargetDeviceType>
+    TPETRA_DEPRECATED
     void sync () {
-      view_.template sync<TargetDeviceType> ();
+      view_.getDualView().template sync<TargetDeviceType> ();
     }
 
     //! Synchronize to Host
+    TPETRA_DEPRECATED
     void sync_host ();
 
     //! Synchronize to Device
+    TPETRA_DEPRECATED
     void sync_device ();
+
+    // Friend needed to prevent deprecation warnings from BlockMultiVector's 
+    // calls to MV's sync* and modify* methods.  The friendship is temporary 
+    // to allow BlockMultiVector to access MultiVector's view_ directly,
+    // rather than call MV's deprecated functions.
+    friend BlockMultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>;
+
+#endif // TPETRA_ENABLE_DEPRECATED_CODE
 
     //! Whether this MultiVector needs synchronization to the given space.
     template<class TargetDeviceType>
     bool need_sync () const {
-      return view_.template need_sync<TargetDeviceType> ();
+      return view_.getDualView().template need_sync<TargetDeviceType> ();
     }
 
     //! Whether this MultiVector needs synchronization to the host.
@@ -1450,30 +1537,87 @@ namespace Tpetra {
     //! Whether this MultiVector needs synchronization to the device.
     bool need_sync_device () const;
 
+#ifdef TPETRA_ENABLE_DEPRECATED_CODE
+
     /// \brief Mark data as modified on the given device \c TargetDeviceType.
     ///
     /// If \c TargetDeviceType is the same as this MultiVector's
     /// device type, then mark the device's data as modified.
     /// Otherwise, mark the host's data as modified.
     template<class TargetDeviceType>
+    TPETRA_DEPRECATED
     void modify () {
-      view_.template modify<TargetDeviceType> ();
+      view_.getDualView().template modify<TargetDeviceType> ();
     }
 
     //! Mark data as modified on the device side.
+    TPETRA_DEPRECATED
     void modify_device ();
 
     //! Mark data as modified on the host side.
+    TPETRA_DEPRECATED
     void modify_host ();
+#endif // TPETRA_ENABLE_DEPRECATED_CODE
 
-    /// \brief Return a view of the local data on a specific device.
+    /// \brief Return a view of the local data on a specific device, with the given access mode.
+    ///   The return type is either dual_view_type::t_dev, dual_view_type::t_host, or the const_type of
+    ///   one of those.
+    ///
     /// \tparam TargetDeviceType The Kokkos Device type whose data to return.
     ///
-    /// Please don't be afraid of the if_c expression in the return
-    /// value's type.  That just tells the method what the return type
-    /// should be: dual_view_type::t_dev if the \c TargetDeviceType
-    /// template parameter matches this Tpetra object's device type,
-    /// else dual_view_type::t_host.
+    /// For example, suppose you create a Tpetra::MultiVector for the
+    /// Kokkos::Cuda device, like this:
+    /// \code
+    /// typedef Kokkos::Compat::KokkosDeviceWrapperNode<Kokkos::Cuda> > node_type;
+    /// typedef Tpetra::Map<int, int, node_type> map_type;
+    /// typedef Tpetra::MultiVector<float, int, int, node_type> mv_type;
+    ///
+    /// RCP<const map_type> map = ...;
+    /// mv_type DV (map, 3);
+    /// \endcode
+    /// If you want to get the CUDA device Kokkos::View as read-write, do this:
+    /// \code
+    /// typedef typename mv_type::dual_view_type dual_view_type;
+    /// typedef typename dual_view_type::t_dev device_view_type;
+    /// device_view_type cudaView = DV.getLocalView<Kokkos::Cuda> (Access::ReadWrite);
+    /// \endcode
+    /// and if you want to get the host mirror of that View, do this:
+    /// \code
+    /// typedef typename dual_view_type::host_mirror_space host_execution_space;
+    /// typedef typename dual_view_type::t_host host_view_type;
+    /// host_view_type hostView = DV.getLocalView<host_execution_space> (Access::ReadWrite);
+    /// \endcode
+    template<class TargetDeviceType>
+    typename std::remove_reference<decltype(std::declval<dual_view_type>().template view<TargetDeviceType>())>::type::const_type
+    getLocalView (Access::ReadOnlyStruct s) const
+    {
+      return view_.template getView<TargetDeviceType>(s);
+    }
+
+
+    template<class TargetDeviceType>
+    typename std::remove_reference<decltype(std::declval<dual_view_type>().template view<TargetDeviceType>())>::type
+    getLocalView (Access::ReadWriteStruct s)
+    {
+      return view_.template getView<TargetDeviceType>(s);
+    }
+
+    template<class TargetDeviceType>
+    typename std::remove_reference<decltype(std::declval<dual_view_type>().template view<TargetDeviceType>())>::type
+    getLocalView (Access::OverwriteAllStruct s)
+    {
+      return view_.template getView<TargetDeviceType>(s);
+    }
+
+
+#ifdef TPETRA_ENABLE_DEPRECATED_CODE
+    /// \brief Return a view of the local data on a specific device. This is a
+    ///   generalization of getLocalViewHost() and getLocalViewDevice(). The
+    ///   returned view has type dual_view_type::t_dev or dual_view_type::t_host,
+    ///   depending on which one has a device, memory space or execution space
+    ///   matching that of TargetDeviceType.
+    ///
+    /// \tparam TargetDeviceType The Kokkos Device type whose data to return.
     ///
     /// For example, suppose you create a Tpetra::MultiVector for the
     /// Kokkos::Cuda device, like this:
@@ -1498,21 +1642,21 @@ namespace Tpetra {
     /// host_view_type hostView = DV.getLocalView<host_execution_space> ();
     /// \endcode
     template<class TargetDeviceType>
-    typename Kokkos::Impl::if_c<
-      std::is_same<
-        typename device_type::memory_space,
-        typename TargetDeviceType::memory_space>::value,
-      typename dual_view_type::t_dev,
-      typename dual_view_type::t_host>::type
-    getLocalView () const {
-      return view_.template view<TargetDeviceType> ();
+    TPETRA_DEPRECATED 
+    typename std::remove_reference<decltype(std::declval<dual_view_type>().template view<TargetDeviceType>())>::type
+    getLocalView () const
+    {
+      return view_.getDualView().template view<TargetDeviceType>();
     }
 
-    //! A local Kokkos::View of host memory
+    //! A local Kokkos::View of host memory. This is a low-level expert function - it requires you to call sync_host() and modify_host() on this MultiVector as needed.
+    TPETRA_DEPRECATED 
     typename dual_view_type::t_host getLocalViewHost () const;
 
-    //! A local Kokkos::View of device memory
+    //! A local Kokkos::View of device memory. This is a low-level expert function - it requires you to call sync_device() and modify_device() on this MultiVector as needed.
+    TPETRA_DEPRECATED 
     typename dual_view_type::t_dev getLocalViewDevice () const;
+#endif
 
     //@}
     //! @name Mathematical methods
@@ -2059,6 +2203,11 @@ namespace Tpetra {
     /// \warning This may be different on different processes.
     bool isConstantStride() const;
 
+    /// \brief Whether this multivector's memory might alias other. This is conservative: if either this or other
+    ///     is not constant stride, then it simply checks whether the contiguous memory allocations overlap. It
+    ///     doesn't check whether the sets of columns overlap. This is a symmetric relation: X.aliases(Y) == Y.aliases(X).
+    bool aliases(const MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>& other) const;
+
     //@}
 
     //! @name Overridden from Teuchos::Describable
@@ -2165,6 +2314,12 @@ namespace Tpetra {
     void
     assign (const MultiVector<Scalar, LocalOrdinal, GlobalOrdinal, Node>& src);
 
+    /// \brief Return another MultiVector with the same entries, but
+    ///   converted to a different Scalar type \c T.
+    template <class T>
+    Teuchos::RCP<MultiVector<T, LocalOrdinal, GlobalOrdinal, Node> >
+    convert () const;
+
 
     // \brief Checks to see if the local length, number of vectors and size of Scalar type match
     /// \param src [in] MultiVector
@@ -2194,38 +2349,7 @@ namespace Tpetra {
     /// retain its current \c const marking, even though it has always
     /// implied a device->host synchronization.  Lesson to the reader:
     /// Use \c const sparingly!
-    mutable dual_view_type view_;
-
-    /// \brief The "original view" of the MultiVector's data.
-    ///
-    /// Methods like offsetView() return a view of a contiguous subset
-    /// of rows.  At some point, we might like to get all of the rows
-    /// back, by taking another view of a <i>super</i>set of rows.
-    /// For example, we might like to get a column Map view of a
-    /// (domain Map view of a (column Map MultiVector)).  Tpetra's
-    /// implementation of Gauss-Seidel and SOR in CrsMatrix relies on
-    /// this functionality.  However, Kokkos (rightfully) forbids us
-    /// from taking a superset of rows of the current view.
-    ///
-    /// We deal with this at the Tpetra level by keeping around the
-    /// original view of <i>all</i> the rows (and columns), which is
-    /// \c origView_.  Methods like offsetView() then use origView_,
-    /// not view_, to make the subview for the returned MultiVector.
-    /// Furthermore, offsetView() can do error checking by getting the
-    /// original number of rows from origView_.
-    ///
-    /// This may pose some problems for offsetView if it is given an
-    /// offset other than zero, but that case is hardly exercised, so
-    /// I am not going to worry about it for now.
-    ///
-    /// Note that the "original" view isn't always original.  It
-    /// always has the original number of rows.  However, some special
-    /// cases of constructors that take a whichVectors argument, when
-    /// whichVectors.size() is 1, may point origView_ to the column to
-    /// view.  Those constructors do this so that the resulting
-    /// MultiVector has constant stride.  This special case does not
-    /// affect correctness of offsetView and related methods.
-    mutable dual_view_type origView_;
+    mutable wrapped_dual_view_type view_;
 
     /// \brief Indices of columns this multivector is viewing.
     ///
@@ -2331,7 +2455,8 @@ namespace Tpetra {
     (const SrcDistObject& sourceObj,
      const size_t numSameIDs,
      const Kokkos::DualView<const local_ordinal_type*, buffer_device_type>& permuteToLIDs,
-     const Kokkos::DualView<const local_ordinal_type*, buffer_device_type>& permuteFromLIDs);
+     const Kokkos::DualView<const local_ordinal_type*, buffer_device_type>& permuteFromLIDs,
+     const CombineMode CM);
 
     virtual void
     packAndPrepare
@@ -2345,8 +2470,7 @@ namespace Tpetra {
      Kokkos::DualView<
        size_t*,
        buffer_device_type> /* numPacketsPerLID */,
-     size_t& constantNumPackets,
-     Distributor& /* distor */);
+     size_t& constantNumPackets);
 
     virtual void
     unpackAndCombine
@@ -2360,8 +2484,47 @@ namespace Tpetra {
        size_t*,
        buffer_device_type> /* numPacketsPerLID */,
      const size_t constantNumPackets,
-     Distributor& /* distor */,
      const CombineMode CM);
+
+  private:
+
+    // If comm buffers can be aliased to the data view, use this
+    // implementation.
+    template<class NO=Node>
+    typename std::enable_if<std::is_same<typename Tpetra::Details::DefaultTypes::CommBufferMemorySpace<typename NO::execution_space>::type,
+                                         typename NO::device_type::memory_space>::value, bool>::type
+    reallocImportsIfNeededImpl (const size_t newSize,
+                                 const bool verbose,
+                                 const std::string* prefix,
+                                 const bool areRemoteLIDsContiguous,
+                                 const CombineMode CM);
+
+    // If comm buffers cannot be aliased to the data view, use this
+    // implementation. (Just calls DistObject::reallocImportsIfNeeded.)
+    template<class NO=Node>
+    typename std::enable_if<!std::is_same<typename Tpetra::Details::DefaultTypes::CommBufferMemorySpace<typename NO::execution_space>::type,
+                                          typename NO::device_type::memory_space>::value, bool>::type
+    reallocImportsIfNeededImpl (const size_t newSize,
+                                 const bool verbose,
+                                 const std::string* prefix,
+                                 const bool areRemoteLIDsContiguous,
+                                 const CombineMode CM);
+  protected:
+
+    virtual bool
+    reallocImportsIfNeeded (const size_t newSize,
+                                 const bool verbose,
+                                 const std::string* prefix,
+                                 const bool areRemoteLIDsContiguous=false,
+                                 const CombineMode CM=INSERT);
+
+
+  public:
+    bool importsAreAliased();
+
+  protected:
+    Kokkos::DualView<impl_scalar_type*, buffer_device_type> unaliased_imports_;
+
     //@}
   }; // class MultiVector
 
@@ -2411,17 +2574,17 @@ namespace Tpetra {
       << " and dst has " << dst.getLocalLength () << " row(s).");
 
     const bool srcMostUpToDateOnDevice = ! src.need_sync_device ();
-    dst.clear_sync_state ();
-    dst.modify_device ();
 
     if (src.isConstantStride () && dst.isConstantStride ()) {
       if (srcMostUpToDateOnDevice) {
-        Details::localDeepCopyConstStride (dst.getLocalViewDevice (),
-                                           src.getLocalViewDevice ());
+        Details::localDeepCopyConstStride (
+                 dst.getLocalViewDevice (Access::OverwriteAll),
+                 src.getLocalViewDevice (Access::ReadOnly));
       }
       else {
-        Details::localDeepCopyConstStride (dst.getLocalViewDevice (),
-                                           src.getLocalViewHost ());
+        Details::localDeepCopyConstStride (
+                 dst.getLocalViewDevice (Access::OverwriteAll),
+                 src.getLocalViewHost (Access::ReadOnly));
       }
     }
     else {
@@ -2429,16 +2592,16 @@ namespace Tpetra {
       auto srcWhichVecs = getMultiVectorWhichVectors (src);
 
       if (srcMostUpToDateOnDevice) {
-        Details::localDeepCopy (dst.getLocalViewDevice (),
-                                src.getLocalViewDevice (),
+        Details::localDeepCopy (dst.getLocalViewDevice (Access::OverwriteAll),
+                                src.getLocalViewDevice (Access::ReadOnly),
                                 dst.isConstantStride (),
                                 src.isConstantStride (),
                                 dstWhichVecs,
                                 srcWhichVecs);
       }
       else {
-        Details::localDeepCopy (dst.getLocalViewDevice (),
-                                src.getLocalViewHost (),
+        Details::localDeepCopy (dst.getLocalViewDevice (Access::OverwriteAll),
+                                src.getLocalViewHost (Access::ReadOnly),
                                 dst.isConstantStride (),
                                 src.isConstantStride (),
                                 dstWhichVecs,

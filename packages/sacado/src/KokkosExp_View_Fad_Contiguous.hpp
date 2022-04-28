@@ -174,7 +174,7 @@ namespace Sacado {
 
 namespace Sacado {
 
-#if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   namespace Fad {
   namespace Exp {
     template <typename T, typename U> class DynamicStorage;
@@ -282,7 +282,7 @@ namespace Sacado {
   }
 #endif // SACADO_NEW_FAD_DESIGN_IS_DEFAULT
 
-#endif // defined(__CUDA_ARCH__)
+#endif // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 
 } // namespace Sacado
 
@@ -374,7 +374,70 @@ struct SacadoViewFill<
       team_policy policy( (output.extent(0)+team_size-1)/team_size ,
                           team_size , stride );
       Kokkos::parallel_for( policy, *this );
-      execution_space().fence();
+    }
+};
+#endif
+
+#if defined (KOKKOS_ENABLE_HIP) && defined(SACADO_VIEW_CUDA_HIERARCHICAL)
+template< class OutputView >
+struct SacadoViewFill<
+  OutputView,
+  typename std::enable_if<
+    ( Kokkos::is_view_fad_contiguous<OutputView>::value &&
+      std::is_same<typename OutputView::execution_space, Kokkos::Experimental::HIP>::value &&
+      !Kokkos::ViewScalarStride<OutputView>::is_unit_stride )
+    >::type
+  >
+{
+  typedef typename OutputView::const_value_type  const_value_type ;
+  typedef typename OutputView::execution_space execution_space ;
+  typedef Kokkos::TeamPolicy< execution_space> team_policy;
+  typedef typename team_policy::member_type team_impl_handle;
+  typedef typename Kokkos::ThreadLocalScalarType<OutputView>::type local_scalar_type;
+  static const unsigned stride = Kokkos::ViewScalarStride<OutputView>::stride;
+
+  const OutputView output ;
+  const_value_type input ;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()( const size_t i0 ) const
+  {
+    local_scalar_type input_stride = Sacado::partition_scalar<stride>(input);
+
+    const size_t n1 = output.extent(1);
+    const size_t n2 = output.extent(2);
+    const size_t n3 = output.extent(3);
+    const size_t n4 = output.extent(4);
+    const size_t n5 = output.extent(5);
+    const size_t n6 = output.extent(6);
+    const size_t n7 = output.extent(7);
+
+    for ( size_t i1 = 0 ; i1 < n1 ; ++i1 ) {
+    for ( size_t i2 = 0 ; i2 < n2 ; ++i2 ) {
+    for ( size_t i3 = 0 ; i3 < n3 ; ++i3 ) {
+    for ( size_t i4 = 0 ; i4 < n4 ; ++i4 ) {
+    for ( size_t i5 = 0 ; i5 < n5 ; ++i5 ) {
+    for ( size_t i6 = 0 ; i6 < n6 ; ++i6 ) {
+    for ( size_t i7 = 0 ; i7 < n7 ; ++i7 ) {
+      output.access(i0,i1,i2,i3,i4,i5,i6,i7) = input_stride ;
+    }}}}}}}
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()( const team_impl_handle& team ) const
+  {
+    const size_t i0 = team.league_rank()*team.team_size() + team.team_rank();
+    if (i0 < output.extent(0))
+      (*this)(i0);
+  }
+
+  SacadoViewFill( const OutputView & arg_out , const_value_type & arg_in )
+    : output( arg_out ), input( arg_in )
+    {
+      const size_t team_size = 256 / stride;
+      team_policy policy( (output.extent(0)+team_size-1)/team_size ,
+                          team_size , stride );
+      Kokkos::parallel_for( policy, *this );
     }
 };
 #endif
@@ -549,6 +612,9 @@ public:
 #ifdef KOKKOS_ENABLE_CUDA
   typedef typename Sacado::LocalScalarType< fad_type, unsigned(PartitionedFadStride) >::type strided_scalar_type;
   typedef typename std::conditional< std::is_same<typename Traits::execution_space, Kokkos::Cuda>::value, strided_scalar_type, fad_type >::type thread_local_scalar_type;
+#elif defined(KOKKOS_ENABLE_HIP)
+  typedef typename Sacado::LocalScalarType< fad_type, unsigned(PartitionedFadStride) >::type strided_scalar_type;
+  typedef typename std::conditional< std::is_same<typename Traits::execution_space, Kokkos::Experimental::HIP>::value, strided_scalar_type, fad_type >::type thread_local_scalar_type;
 #else
   typedef fad_type thread_local_scalar_type;
 #endif
@@ -654,7 +720,7 @@ public:
 
   // Size of sacado scalar dimension
   KOKKOS_FORCEINLINE_FUNCTION constexpr unsigned dimension_scalar() const
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
     { return PartitionedFadStaticDimension ? PartitionedFadStaticDimension+1 : (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x + 1; }
 #else
     { return m_fad_size.value+1; }
@@ -667,9 +733,9 @@ public:
   //----------------------------------------
   // Range of mapping
 
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
   // Return type of reference operators
-  // this only works if you are using a team-parallel operation on Cuda!
+  // this only works if you are using a team-parallel operation on Cuda or HIP!
   // typedef typename
   //   Sacado::ViewFadType< thread_local_scalar_type , PartitionedFadStaticDimension , (unsigned(ParitionedFadStride) > 1 ? PartitionedFadStride : 0) >::type  reference_type ;
   typedef typename
@@ -693,7 +759,7 @@ public:
 
   /** \brief Raw data access */
   KOKKOS_INLINE_FUNCTION constexpr pointer_type data() const
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && (defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
     { return m_impl_handle + threadIdx.x; }
 #else
     { return m_impl_handle + m_fad_index; }
@@ -705,7 +771,7 @@ public:
   reference_type
   reference() const
     {
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -725,7 +791,7 @@ public:
                             is_layout_left, reference_type>::type
   reference( const I0 & i0 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(0,i0);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -745,7 +811,7 @@ public:
                            !is_layout_left, reference_type>::type
   reference( const I0 & i0 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(i0,0);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -765,7 +831,7 @@ public:
                            is_layout_left, reference_type>::type
   reference( const I0 & i0 , const I1 & i1 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(0,i0,i1);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && (defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -785,7 +851,7 @@ public:
                            !is_layout_left, reference_type>::type
   reference( const I0 & i0 , const I1 & i1 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(i0,i1,0);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -806,7 +872,7 @@ public:
                            is_layout_left, reference_type>::type
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(0,i0,i1,i2);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -826,7 +892,7 @@ public:
                            !is_layout_left, reference_type>::type
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(i0,i1,i2,0);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -846,7 +912,7 @@ public:
                            is_layout_left, reference_type>::type
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 , const I3 & i3 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(0,i0,i1,i2,i3);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -866,7 +932,7 @@ public:
                            !is_layout_left, reference_type>::type
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 , const I3 & i3 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(i0,i1,i2,i3,0);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -888,7 +954,7 @@ public:
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 , const I3 & i3
            , const I4 & i4 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(0,i0,i1,i2,i3,i4);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -910,7 +976,7 @@ public:
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 , const I3 & i3
            , const I4 & i4 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(i0,i1,i2,i3,i4,0);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -932,7 +998,7 @@ public:
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 , const I3 & i3
            , const I4 & i4 , const I5 & i5 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(0,i0,i1,i2,i3,i4,i5);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -954,7 +1020,7 @@ public:
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 , const I3 & i3
            , const I4 & i4 , const I5 & i5 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(i0,i1,i2,i3,i4,i5,0);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -976,7 +1042,7 @@ public:
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 , const I3 & i3
            , const I4 & i4 , const I5 & i5 , const I6 & i6 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(0,i0,i1,i2,i3,i4,i5,i6);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -998,7 +1064,7 @@ public:
   reference( const I0 & i0 , const I1 & i1 , const I2 & i2 , const I3 & i3
            , const I4 & i4 , const I5 & i5 , const I6 & i6 ) const
     { pointer_type beg = m_impl_handle + m_array_offset(i0,i1,i2,i3,i4,i5,i6,0);
-#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && defined(__CUDA_ARCH__)
+#if defined(SACADO_VIEW_CUDA_HIERARCHICAL) && ( defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) )
       const unsigned index = threadIdx.x;
       const unsigned strd = blockDim.x;
       const unsigned size = (m_fad_size.value+blockDim.x-threadIdx.x-1) / blockDim.x;
@@ -1027,14 +1093,14 @@ public:
 
   //----------------------------------------
 
-  KOKKOS_INLINE_FUNCTION ~ViewMapping() = default ;
+  KOKKOS_DEFAULTED_FUNCTION ~ViewMapping() = default ;
   KOKKOS_INLINE_FUNCTION ViewMapping() : m_impl_handle(0) , m_impl_offset() , m_array_offset() , m_fad_size(0) , m_original_fad_size(0) , m_fad_stride(1) , m_fad_index(0)  {}
 
-  KOKKOS_INLINE_FUNCTION ViewMapping( const ViewMapping & ) = default ;
-  KOKKOS_INLINE_FUNCTION ViewMapping & operator = ( const ViewMapping & ) = default ;
+  KOKKOS_DEFAULTED_FUNCTION ViewMapping( const ViewMapping & ) = default ;
+  KOKKOS_DEFAULTED_FUNCTION ViewMapping & operator = ( const ViewMapping & ) = default ;
 
-  KOKKOS_INLINE_FUNCTION ViewMapping( ViewMapping && ) = default ;
-  KOKKOS_INLINE_FUNCTION ViewMapping & operator = ( ViewMapping && ) = default ;
+  KOKKOS_DEFAULTED_FUNCTION ViewMapping( ViewMapping && ) = default ;
+  KOKKOS_DEFAULTED_FUNCTION ViewMapping & operator = ( ViewMapping && ) = default ;
 
   template< class ... P >
   KOKKOS_INLINE_FUNCTION
@@ -1121,6 +1187,7 @@ public:
         record->m_destroy = functor_type( ( (ViewCtorProp<void,execution_space> const &) prop).value
                                         , (fad_value_type *) m_impl_handle
                                         , m_array_offset.span()
+                                        , record->get_label()
                                         );
 
         // Construct values
@@ -1206,10 +1273,10 @@ public:
         "View assignment must have compatible layout" );
 
       static_assert(
-        std::is_same< typename DstTraits::scalar_array_type
-                    , typename SrcTraits::scalar_array_type >::value ||
-        std::is_same< typename DstTraits::scalar_array_type
-                    , typename SrcTraits::const_scalar_array_type >::value ,
+        std::is_same< typename DstTraits::value_type
+                    , typename SrcTraits::value_type >::value ||
+        std::is_same< typename DstTraits::value_type
+                    , typename SrcTraits::const_value_type >::value ,
         "View assignment must have same value type or const = non-const" );
 
       static_assert(

@@ -89,9 +89,10 @@ namespace MueLu {
 #elif defined(HAVE_AMESOS2_BASKER)
       type_ = "Basker";
 #else
-      throw Exceptions::RuntimeError("Amesos2 has been compiled without SuperLU_DIST, SuperLU, Klu, or Basker. By default, MueLu tries"
-                                     "to use one of these libraries. Amesos2 must be compiled with one of these solvers, "
-                                     "or a valid Amesos2 solver has to be specified explicitly.");
+      this->declareConstructionOutcome(true, std::string("Amesos2 has been compiled without SuperLU_DIST, SuperLU, Klu, or Basker. By default, MueLu tries") +
+                                       "to use one of these libraries. Amesos2 must be compiled with one of these solvers, " +
+                                       "or a valid Amesos2 solver has to be specified explicitly.");
+      return;
 #endif
       if (oldtype != "")
         this->GetOStream(Warnings0) << "MueLu::Amesos2Smoother: \"" << oldtype << "\" is not available. Using \"" << type_ << "\" instead" << std::endl;
@@ -100,8 +101,8 @@ namespace MueLu {
     }
 
     // Check the validity of the solver type parameter
-    TEUCHOS_TEST_FOR_EXCEPTION(Amesos2::query(type_) == false, Exceptions::RuntimeError, "The Amesos2 library reported that the solver '" << type_ << "' is not available. "
-                               "Amesos2 has been compiled without the support of this solver, or the solver name is misspelled.");
+    this->declareConstructionOutcome(Amesos2::query(type_) == false, "The Amesos2 library reported that the solver '" + type_ + "' is not available. " +
+                                     "Amesos2 has been compiled without the support of this solver, or the solver name is misspelled.");
   }
 
   template <class Scalar,class LocalOrdinal, class GlobalOrdinal, class Node>
@@ -169,12 +170,6 @@ namespace MueLu {
       }
 
       ArrayRCP<const SC> nullspaceRCP, nullspaceImpRCP;
-      ArrayView<const SC> nullspace, nullspaceImp;
-      nullspaceRCP = Nullspace->getData(0);
-      nullspace = nullspaceRCP();
-      nullspaceImpRCP = NullspaceImp->getData(0);
-      nullspaceImp = nullspaceImpRCP();
-
       RCP<CrsMatrixWrap> Acrs = rcp_dynamic_cast<CrsMatrixWrap>(A);
 
       TEUCHOS_TEST_FOR_EXCEPTION(Acrs.is_null(), Exceptions::RuntimeError,
@@ -189,7 +184,7 @@ namespace MueLu {
       ArrayRCP<LO>     newColIndices_RCP;
       ArrayRCP<SC>     newValues_RCP;
 
-      size_t N = rowMap->getNodeNumElements();
+      size_t N = rowMap->getLocalNumElements();
       newRowPointers_RCP.resize(N+1);
       newColIndices_RCP.resize(N*M);
       newValues_RCP.resize(N*M);
@@ -200,6 +195,12 @@ namespace MueLu {
 
       SC normalization = Nullspace->getVector(0)->norm2();
       normalization = Teuchos::ScalarTraits<Scalar>::one()/(normalization*normalization);
+
+      ArrayView<const SC> nullspace, nullspaceImp;
+      nullspaceRCP = Nullspace->getData(0);
+      nullspace = nullspaceRCP();
+      nullspaceImpRCP = NullspaceImp->getData(0);
+      nullspaceImp = nullspaceImpRCP();
 
       // form nullspace * nullspace^T
       for (size_t i = 0; i < N; i++) {

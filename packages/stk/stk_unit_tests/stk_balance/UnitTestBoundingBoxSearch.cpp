@@ -46,7 +46,8 @@ protected:
       0,1,0, 1,1,0, 2,1,0, 3,1,0, 4,1,0
     };
 
-    stk::unit_test_util::setup_text_mesh(get_bulk(), meshDesc, coordinates);
+    stk::unit_test_util::setup_text_mesh(
+        get_bulk(), stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
   }
 
   void make_4_unit_quad_shell_single_gap_mesh(double gapSize)
@@ -85,7 +86,8 @@ protected:
       0,1,0, 1,1,0, 2,1,0, 2+gapSize,1,0, 3+gapSize,1,0, 4+gapSize,1,0
     };
 
-    stk::unit_test_util::setup_text_mesh(get_bulk(), meshDesc, coordinates);
+    stk::unit_test_util::setup_text_mesh(
+        get_bulk(), stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
   }
 
   void make_4_unit_quad_shell_all_gap_mesh(double gapSize)
@@ -124,7 +126,8 @@ protected:
       0,1,0, 1,1,0, 1+gapSize,1,0, 2+gapSize,1,0, 2+2*gapSize,1,0, 3+2*gapSize,1,0, 3+3*gapSize,1,0, 4+3*gapSize,1,0
     };
 
-    stk::unit_test_util::setup_text_mesh(get_bulk(), meshDesc, coordinates);
+    stk::unit_test_util::setup_text_mesh(
+        get_bulk(), stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
   }
 
   void make_6_unit_tri_shell_connected_mesh()
@@ -171,7 +174,8 @@ protected:
       0,1,0, 1,1,0, 2,1,0, 3,1,0
     };
 
-    stk::unit_test_util::setup_text_mesh(get_bulk(), meshDesc, coordinates);
+    stk::unit_test_util::setup_text_mesh(
+        get_bulk(), stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
   }
 
   void make_6_unit_tri_shell_single_gap_mesh(double gapSize)
@@ -219,7 +223,8 @@ protected:
       0,1,0, 1,1,0, 1+gapSize,1,0, 2+gapSize,1,0, 3+gapSize,1,0
     };
 
-    stk::unit_test_util::setup_text_mesh(get_bulk(), meshDesc, coordinates);
+    stk::unit_test_util::setup_text_mesh(
+        get_bulk(), stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
   }
 
   void make_4_unit_hex_single_gap_mesh(double gapSize)
@@ -262,7 +267,8 @@ protected:
       4+gapSize,0,0, 4+gapSize,1,0, 4+gapSize,1,1, 4+gapSize,0,1
     };
 
-    stk::unit_test_util::setup_text_mesh(get_bulk(), meshDesc, coordinates);
+    stk::unit_test_util::setup_text_mesh(
+        get_bulk(), stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
   }
 
   void make_two_particle_mesh()
@@ -281,7 +287,8 @@ protected:
     }
     std::vector<double> coordinates = { 0,0,0, 2,0,0 };
 
-    stk::unit_test_util::setup_text_mesh(get_bulk(), meshDesc, coordinates);
+    stk::unit_test_util::setup_text_mesh(
+        get_bulk(), stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
   }
 
   void make_particle_unit_quad_shell_mesh()
@@ -300,7 +307,8 @@ protected:
     }
     std::vector<double> coordinates = { 0,0,0, 1,0,0, 1,1,0, 0,1,0, 2,0,0 };
 
-    stk::unit_test_util::setup_text_mesh(get_bulk(), meshDesc, coordinates);
+    stk::unit_test_util::setup_text_mesh(
+        get_bulk(), stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
   }
 
   bool check_edges(const std::vector<stk::balance::GraphEdge> & graphEdges,
@@ -323,7 +331,7 @@ protected:
       const auto foundEdge = std::find_if(graphEdges.begin(), graphEdges.end(),
           [&](const stk::balance::GraphEdge & curr){
               return ( (bulk.identifier(curr.vertex1()) == expected.first) &&
-                       (curr.vertex2() == expected.second) );
+                       (curr.vertex2_id() == expected.second) );
           });
 
       if (foundEdge == graphEdges.end()) {
@@ -360,7 +368,7 @@ TEST_F(BoundingBoxSearch, fourUnitQuadShell_connected)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {}));
 }
@@ -385,7 +393,7 @@ TEST_F(BoundingBoxSearch, fourUnitQuadShell_tooLargeTolerance)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{1,3}, {3,1}, {2,4}, {4,2}}));
 }
@@ -411,7 +419,7 @@ TEST_F(BoundingBoxSearch, fourUnitQuadShell_smallGap)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{2,3}, {3,2}}));
 }
@@ -437,7 +445,7 @@ TEST_F(BoundingBoxSearch, fourUnitQuadShell_largeGap)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {}));
 }
@@ -463,7 +471,7 @@ TEST_F(BoundingBoxSearch, fourUnitQuadShell_allGaps)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{1,2}, {2,1}, {2,3}, {3,2}, {3,4}, {4,3}}));
 }
@@ -488,7 +496,7 @@ TEST_F(BoundingBoxSearch, sixUnitTriShell_connected)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {}));
 }
@@ -514,7 +522,7 @@ TEST_F(BoundingBoxSearch, sixUnitTriShell_smallGap)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{3,4}, {4,3}}));
 }
@@ -540,7 +548,7 @@ TEST_F(BoundingBoxSearch, sixUnitTriShell_largeGap)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {}));
 }
@@ -578,7 +586,7 @@ TEST_F(BoundingBoxSearch, fourUnitHex_smallGap)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{2,3}, {3,2}}));
 }
@@ -603,7 +611,7 @@ TEST_F(BoundingBoxSearch, particleParticle_smallTolerance)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {}));
 }
@@ -628,7 +636,7 @@ TEST_F(BoundingBoxSearch, particleParticle_largeTolerance)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{1,2}, {2,1}}));
 }
@@ -654,7 +662,7 @@ TEST_F(BoundingBoxSearch, particleQuadShell_smallTolerance)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {}));
 }
@@ -680,7 +688,7 @@ TEST_F(BoundingBoxSearch, particleQuadShell_smallParticleTolerance)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{1,2}, {2,1}}));
 }
@@ -706,7 +714,7 @@ TEST_F(BoundingBoxSearch, particleQuadShell_smallFaceTolerance)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{1,2}, {2,1}}));
 }
@@ -732,7 +740,7 @@ TEST_F(BoundingBoxSearch, particleQuadShell_largeTolerance)
   stk::balance::internal::addGraphEdgesUsingBBSearch(get_bulk(),
                                                      balanceSettings,
                                                      graphEdges,
-                                                     get_meta().locally_owned_part());
+                                                     get_meta().universal_part());
 
   EXPECT_TRUE(check_edges(graphEdges, {{1,2}, {2,1}}));
 }

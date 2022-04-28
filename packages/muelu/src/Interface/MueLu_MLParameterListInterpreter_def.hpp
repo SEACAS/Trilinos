@@ -49,7 +49,7 @@
 #include <Teuchos_XMLParameterListHelpers.hpp>
 
 #include "MueLu_ConfigDefs.hpp"
-#if defined(HAVE_MUELU_ML) && defined(HAVE_MUELU_EPETRA)
+#if defined(HAVE_MUELU_ML)
 #include <ml_ValidateParameters.h>
 #endif
 
@@ -213,6 +213,10 @@ namespace MueLu {
     if (typeid(Node).name() == typeid(Kokkos::Compat::KokkosCudaWrapperNode).name())
       useKokkosRefactor = true;
 # endif
+# ifdef HAVE_MUELU_HIP
+    if (typeid(Node).name() == typeid(Kokkos::Compat::KokkosHIPWrapperNode).name())
+      useKokkosRefactor = true;
+# endif
 #endif
     if (paramList.isType<bool>("use kokkos refactor")) {
       useKokkosRefactor = paramList.get<bool>("use kokkos refactor");
@@ -256,6 +260,7 @@ namespace MueLu {
     if (verbosityLevel >= 10) eVerbLevel = High;
     if (verbosityLevel >= 11) eVerbLevel = Extreme;
     if (verbosityLevel >= 42) eVerbLevel = Test;
+    if (verbosityLevel >= 43) eVerbLevel = InterfaceTest;
     this->verbosity_ = eVerbLevel;
 
 
@@ -612,7 +617,7 @@ namespace MueLu {
           Teuchos::ArrayRCP<Scalar> coordsi  = coordinates->getDataNonConst(i);
           const size_t              myLength = coordinates->getLocalLength();
           for (size_t j = 0; j < myLength; j++) {
-            coordsi[j] = coordPTR[0][j];
+            coordsi[j] = coordPTR[i][j];
           }
         }
         fineLevel->Set("Coordinates",coordinates);
@@ -692,6 +697,43 @@ namespace MueLu {
       smooProto = rcp( new TrilinosSmoother(ifpackType, smootherParamList, 0) );
       smooProto->SetFactory("A", AFact);
 
+    } else if (type == "Hiptmair") {
+      ifpackType = "HIPTMAIR";
+      std::string subSmootherType = "Chebyshev";
+      if (paramList.isParameter("subsmoother: type"))
+        subSmootherType = paramList.get<std::string>("subsmoother: type");
+      std::string subSmootherIfpackType;
+      if (subSmootherType == "Chebyshev")
+        subSmootherIfpackType = "CHEBYSHEV";
+      else if (subSmootherType == "Jacobi" || subSmootherType == "Gauss-Seidel" || subSmootherType == "symmetric Gauss-Seidel") {
+        if (subSmootherType == "symmetric Gauss-Seidel") subSmootherType = "Symmetric Gauss-Seidel"; // FIXME
+        subSmootherIfpackType = "RELAXATION";
+      } else
+        TEUCHOS_TEST_FOR_EXCEPTION(true, Exceptions::RuntimeError, "MueLu::MLParameterListInterpreter: unknown smoother type. '" << subSmootherType << "' not supported by MueLu.");
+
+      smootherParamList.set("hiptmair: smoother type 1", subSmootherIfpackType);
+      smootherParamList.set("hiptmair: smoother type 2", subSmootherIfpackType);
+
+      auto smoother1ParamList = smootherParamList.sublist("hiptmair: smoother list 1");
+      auto smoother2ParamList = smootherParamList.sublist("hiptmair: smoother list 2");
+
+      if (subSmootherType == "Chebyshev") {
+        MUELU_COPY_PARAM(paramList, "subsmoother: edge sweeps", int, 2, smoother1ParamList, "chebyshev: degree");
+        MUELU_COPY_PARAM(paramList, "subsmoother: node sweeps", int, 2, smoother2ParamList, "chebyshev: degree");
+
+        MUELU_COPY_PARAM(paramList, "subsmoother: Chebyshev", double, 20, smoother1ParamList, "chebyshev: ratio eigenvalue");
+        MUELU_COPY_PARAM(paramList, "subsmoother: Chebyshev", double, 20, smoother2ParamList, "chebyshev: ratio eigenvalue");
+      } else {
+        MUELU_COPY_PARAM(paramList, "subsmoother: edge sweeps", int, 2, smoother1ParamList, "relaxation: sweeps");
+        MUELU_COPY_PARAM(paramList, "subsmoother: node sweeps", int, 2, smoother2ParamList, "relaxation: sweeps");
+
+        MUELU_COPY_PARAM(paramList, "subsmoother: SGS damping factor", double, 0.8, smoother2ParamList, "relaxation: damping factor");
+      }
+
+
+      smooProto = rcp( new TrilinosSmoother(ifpackType, smootherParamList, 0) );
+      smooProto->SetFactory("A", AFact);
+
     } else if (type == "IFPACK") { // TODO: this option is not described in the ML Guide v5.0
 
 #if defined(HAVE_MUELU_EPETRA) && defined(HAVE_MUELU_IFPACK)
@@ -725,7 +767,7 @@ namespace MueLu {
       // Validator: following upper/lower case is what is allowed by ML
       bool valid = false;
       const int  validatorSize = 5;
-      std::string validator[validatorSize] = {"Superlu", "Superludist", "KLU", "UMFPACK"}; /* TODO: should "" be allowed? */
+      std::string validator[validatorSize] = {"Superlu", "Superludist", "KLU", "UMFPACK", "MUMPS"}; /* TODO: should "" be allowed? */
       for (int i=0; i < validatorSize; i++) { if (validator[i] == solverType) valid = true; }
       TEUCHOS_TEST_FOR_EXCEPTION(!valid, Exceptions::RuntimeError, "MueLu::MLParameterListInterpreter: unknown smoother type. '" << type << "' not supported.");
 
@@ -777,7 +819,7 @@ namespace MueLu {
   void MLParameterListInterpreter<Scalar, LocalOrdinal, GlobalOrdinal, Node>::SetupOperator(Operator & Op) const {
     try {
       Matrix& A = dynamic_cast<Matrix&>(Op);
-      if (A.GetFixedBlockSize() != blksize_)
+      if (A.IsFixedBlockSizeSet() && (A.GetFixedBlockSize() != blksize_))
         this->GetOStream(Warnings0) << "Setting matrix block size to " << blksize_ << " (value of the parameter in the list) "
             << "instead of " << A.GetFixedBlockSize() << " (provided matrix)." << std::endl;
 

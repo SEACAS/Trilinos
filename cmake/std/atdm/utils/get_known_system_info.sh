@@ -30,17 +30,21 @@ fi
 
 source ${ATDM_CONFIG_SCRIPT_DIR}/utils/get_system_info_utils.sh
 
-realHostname=`hostname`
 if [[ "${ATDM_CONFIG_GET_KNOW_SYSTEM_INFO_REAL_HOSTNAME_OVERRIDE_FOR_UNIT_TESTING}" ]] ; then
-  echo
-  echo "***"
-  echo "*** WARNING: realHostname=$realHostname overriden to value of"
-  echo "*** ATDM_CONFIG_GET_KNOW_SYSTEM_INFO_REAL_HOSTNAME_OVERRIDE_FOR_UNIT_TESTING='${ATDM_CONFIG_GET_KNOW_SYSTEM_INFO_REAL_HOSTNAME_OVERRIDE_FOR_UNIT_TESTING}'"
-  echo "*** in <trilinos-dir>/cmake/std/atdm/utils/get_known_system_info.sh."
-  echo "*** This variable should only be set for unit testing purposes!"
-  echo "***"
-  echo
+  if [[ -z $ATDM_CONFIG_DISABLE_WARNINGS ]]; then
+    echo
+    echo "***"
+    echo "*** WARNING: realHostname=$realHostname overriden to value of"
+    echo "*** ATDM_CONFIG_GET_KNOW_SYSTEM_INFO_REAL_HOSTNAME_OVERRIDE_FOR_UNIT_TESTING='${ATDM_CONFIG_GET_KNOW_SYSTEM_INFO_REAL_HOSTNAME_OVERRIDE_FOR_UNIT_TESTING}'"
+    echo "*** in <trilinos-dir>/cmake/std/atdm/utils/get_known_system_info.sh."
+    echo "*** This variable should only be set for unit testing purposes!"
+    echo "***"
+    echo
+  fi
   realHostname=${ATDM_CONFIG_GET_KNOW_SYSTEM_INFO_REAL_HOSTNAME_OVERRIDE_FOR_UNIT_TESTING}
+else
+  realHostname=`hostname`
+  ATDM_CONFIG_SEMS_GET_PLATFORM=/projects/sems/modulefiles/utils/get-platform
 fi
 #echo "Hostname = '$realHostname'"
 
@@ -49,8 +53,8 @@ fi
 #
 # The order these are listed in this array matters only if multiple known
 # system name keywords are listed in the build name string.  For example, if
-# both 'ride' and 'cts1' are listed in the build name, then 'ride' will be the
-# one recognized and 'cts1' will be ignored (because 'ride' is listed above
+# both 'shiller' and 'cts1' are listed in the build name, then 'shiller' will be the
+# one recognized and 'cts1' will be ignored (because 'shiller' is listed above
 # 'cts1').
 #
 # However, it is important that "all" of the known systems be listed in this
@@ -59,16 +63,15 @@ fi
 
 ATDM_KNOWN_SYSTEM_NAMES_LIST=(
   shiller
-  ride
-  mutrino   # Will be repalced by 'ats1'
-  waterman
+  ats1
+  mutrino   # Deprecated, to be repalced by 'ats1'
   ats2
   van1-tx2
+  cts1empire
   cts1
   tlcc2
   sems-rhel7
-  sems-rhel6
-  cee-rhel6  # Used for CEE RHEL7 machines as well!
+  cee-rhel7  # Used for CEE RHEL7 machines as well!
   spack-rhel
   )
 
@@ -100,18 +103,6 @@ if [[ $realHostname == "hansen"* ]] ; then
 elif [[ $realHostname == "shiller"* ]] ; then
   hostnameMatch=shiller
   hostnameMatchSystemName=shiller
-elif [[ $realHostname == "white"* ]] ; then
-  hostnameMatch=white
-  hostnameMatchSystemName=ride
-elif [[ $realHostname == "ride"* ]] ; then
-  hostnameMatch=ride
-  hostnameMatchSystemName=ride
-elif [[ $realHostname == "mutrino"* ]] ; then
-  hostnameMatch=mutrino
-  hostnameMatchSystemName=mutrino
-elif [[ $realHostname == "waterman"* ]] ; then
-  hostnameMatch=waterman
-  hostnameMatchSystemName=waterman
 elif [[ $realHostname == "vortex"* ]] ; then
   hostnameMatch=vortex
   hostnameMatchSystemName=ats2
@@ -136,6 +127,14 @@ fi
 # matching system type will be selected.
 #
 
+# ATS-1 systems
+if [[ $realHostname == "mutrino"* || $HOST == "mutrino"* ]] ; then
+  systemNameTypeMatchedList+=(ats1)
+  systemNameTypeMatchedListHostNames[ats1]=mutrino
+  systemNameTypeMatchedList+=(mutrino)
+  systemNameTypeMatchedListHostNames[mutrino]=mutrino
+fi
+
 # ASTRA/Van1-Tx2 systems
 if [[ $SNLSYSTEM == "astra"* ]] ; then
   systemNameTypeMatchedList+=(van1-tx2)
@@ -144,6 +143,10 @@ fi
 
 # CTS1 systems
 if [[ $SNLSYSTEM == "cts1" ]] ; then
+  # Make cts1empire the default environment
+  systemNameTypeMatchedList+=(cts1empire)
+  systemNameTypeMatchedListHostNames[cts1empire]=$SNLCLUSTER
+  # Add cts1 to the list for the D.1 branch, below
   systemNameTypeMatchedList+=(cts1)
   systemNameTypeMatchedListHostNames[cts1]=$SNLCLUSTER
 fi
@@ -154,33 +157,26 @@ if [[ $SNLSYSTEM == "tlcc2"* ]] ; then
   systemNameTypeMatchedListHostNames[tlcc2]=$SNLCLUSTER
 fi
 
-# SEMS RHEL6 and RHEL7 systems
-if [[ "${SEMS_PLATFORM}" == "rhel6-x86_64" ]] ; then
-  systemNameTypeMatchedList+=(sems-rhel6)
-  systemNameTypeMatchedListHostNames[sems-rhel6]=sems-rhel6
-elif [[ "${SEMS_PLATFORM}" == "rhel7-x86_64" ]] ; then
+# SEMS RHEL7 systems
+if [[ "${SEMS_PLATFORM}" == "rhel7-x86_64" ]] ; then
   systemNameTypeMatchedList+=(sems-rhel7)
   systemNameTypeMatchedListHostNames[sems-rhel7]=sems-rhel7
-elif [[ "${SNLSYSTEM}" == "astra" ]] ; then
+elif [[ "${SNLSYSTEM}" == "astra" || \
+        "${SNLSYSTEM}" == "vortex" ]] ; then
   echo "Don't call get-platform on 'astra' systems" > /dev/null
   # Above logic avoids an 'ERROR: Unrecognized cluster <name>' on these systems
-elif [[ -f /projects/sems/modulefiles/utils/get-platform ]] ; then
-  ATDM_SYSTEM_NAME=`source /projects/sems/modulefiles/utils/get-platform`
-  if [[ $ATDM_SYSTEM_NAME == "rhel6-x86_64" ]] ; then
-    systemNameTypeMatchedList+=(sems-rhel6)
-    systemNameTypeMatchedListHostNames[sems-rhel6]=sems-rhel6
-  elif [[ $ATDM_SYSTEM_NAME == "rhel7-x86_64" ]] ; then
+elif [[ -f $ATDM_CONFIG_SEMS_GET_PLATFORM ]] ; then
+  ATDM_SYSTEM_NAME=`source $ATDM_CONFIG_SEMS_GET_PLATFORM`
+  if [[ $ATDM_SYSTEM_NAME == "rhel7-x86_64" ]] ; then
     systemNameTypeMatchedList+=(sems-rhel7)
     systemNameTypeMatchedListHostNames[sems-rhel7]=sems-rhel7
   fi
 fi
 
-# CEE RHEL6 (and RHEL7) systems
-if [[ "${SNLSYSTEM}" == "cee" ]] ; then
-  if [[ "${SNLCLUSTER}" == "linux_rh6" ]] || [[ "${SNLCLUSTER}" == "linux_rh7" ]] ; then
-    systemNameTypeMatchedList+=(cee-rhel6)
-    systemNameTypeMatchedListHostNames[cee-rhel6]=cee-rhel6
-  fi
+# CEE RHEL7 systems
+if [[ "${SNLSYSTEM}" == "cee" ]] && [[ "${SNLCLUSTER}" == "linux_rh7" ]] ; then
+  systemNameTypeMatchedList+=(cee-rhel7)
+  systemNameTypeMatchedListHostNames[cee-rhel7]=cee-rhel7
 fi
 
 # If the user puts 'spack-rhel' in the build name, assume that the modules are
@@ -207,8 +203,8 @@ fi
 # D) Select a known system given the above info
 #
 
-ATDM_HOSTNAME=
 ATDM_SYSTEM_NAME=
+ATDM_HOSTNAME=
 
 # D.1) First, go with the system name in the build name if one was recognised
 if [[ "${ATDM_SYSTEM_NAME}" == "" ]] && [[ "${knownSystemNameInBuildName}" != "" ]] ; then
@@ -219,7 +215,7 @@ fi
 
 # D.2) Last, go with the first matching system name on this machine
 if [[ "${ATDM_SYSTEM_NAME}" == "" ]] && [[ "${systemNameTypeMatchedList}" != "" ]] ; then
-  ATDM_SYSTEM_NAME=${systemNameTypeMatchedList[0]}  # First matching system type is preferred!
+  ATDM_SYSTEM_NAME=${systemNameTypeMatchedList[0]} # First matching system is preferred!
   ATDM_HOSTNAME=${systemNameTypeMatchedListHostNames[${ATDM_SYSTEM_NAME}]}
 fi
 
@@ -227,7 +223,7 @@ fi
 #echo "ATDM_SYSTEM_NAME = '${ATDM_SYSTEM_NAME}'"
 
 #
-# E) We have selected a known system set the env vars for that!
+# E) If we have selected a known system then set env vars for that system
 #
 
 if [[ $ATDM_SYSTEM_NAME != "" ]] ; then

@@ -1,38 +1,11 @@
 /* -*- Mode: c++ -*- */
 
 /*
- * Copyright (c) 2014-2017 National Technology & Engineering Solutions
+ * Copyright(C) 1999-2021 National Technology & Engineering Solutions
  * of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
  * NTESS, the U.S. Government retains certain rights in this software.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *
- *     * Neither the name of NTESS nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * See packages/seacas/LICENSE for details
  */
 
 
@@ -70,6 +43,7 @@ typedef SEAMS::Parser::token_type token_type;
 int file_must_exist = 0; /* Global used by include/conditional include */
 
 /* Global variables used by the looping mechanism */
+ SEAMS::file_rec *outer_file = nullptr;
 int loop_lvl = 0;
 std::fstream *tmp_file;
 const char  *temp_f;
@@ -78,7 +52,7 @@ const char  *temp_f;
 #pragma diag_suppress code_is_unreachable
 #endif
 
-#define MAX_IF_NESTING 64
+#define MAX_IF_NESTING 1024
 
  int if_state[MAX_IF_NESTING] = {0}; // INITIAL
  int if_case_run[MAX_IF_NESTING] = {false}; /* Has any if or elseif condition executed */
@@ -148,13 +122,14 @@ integer {D}+({E})?
     BEGIN(GET_LOOP_VAR);
     if (aprepro.ap_options.debugging)
       std::cerr << "DEBUG LOOP - Found loop begin test " << yytext << " in file "
-                << aprepro.ap_file_list.top().name << "\n";
+                << aprepro.ap_file_list.top().name << " at line " << aprepro.ap_file_list.top().lineno << "\n";
   }
 }
 
 <GET_LOOP_VAR>{
   {number}")".*"\n" |
             {integer}")}".*"\n" {
+    aprepro.ap_file_list.top().lineno++;
     /* Loop control defined by integer */
     char *pt = strchr(yytext, ')');
     *pt = '\0';
@@ -166,22 +141,23 @@ integer {D}+({E})?
     else {/* Value defined and != 0. */
       temp_f = get_temp_filename();
       SEAMS::file_rec new_file(temp_f, 0, true, (int)yylval->val);
-      aprepro.ap_file_list.push(new_file);
-
       if (aprepro.ap_options.debugging)
         std::cerr << "DEBUG LOOP VAR = " << aprepro.ap_file_list.top().loop_count
                   << " in file " << aprepro.ap_file_list.top().name
-                  << " at line " << aprepro.ap_file_list.top().lineno << "\n";
+                  << " at line " << aprepro.ap_file_list.top().lineno-1 << "\n";
+
+      outer_file = &aprepro.ap_file_list.top();
+      aprepro.ap_file_list.push(new_file);
 
       tmp_file = new std::fstream(temp_f, std::ios::out);
       loop_lvl++;
       BEGIN(LOOP);
     }
-    aprepro.ap_file_list.top().lineno++;
     aprepro.isCollectingLoop = true;
   }
 
   .+")}".*"\n"  {
+    aprepro.ap_file_list.top().lineno++;
     /* Loop control defined by variable */
     symrec *s;
     char *pt = strchr(yytext, ')');
@@ -196,28 +172,28 @@ integer {D}+({E})?
         BEGIN(LOOP_SKIP);
       }
       else { /* Value defined and != 0. */
-        temp_f = get_temp_filename();
-        SEAMS::file_rec new_file(temp_f, 0, true, (int)s->value.var);
-        aprepro.ap_file_list.push(new_file);
-
         if (aprepro.ap_options.debugging)
           std::cerr << "DEBUG LOOP VAR = " << aprepro.ap_file_list.top().loop_count
                     << " in file " << aprepro.ap_file_list.top().name
-                    << " at line " << aprepro.ap_file_list.top().lineno << "\n";
+                    << " at line " << aprepro.ap_file_list.top().lineno-1 << "\n";
+
+        temp_f = get_temp_filename();
+        SEAMS::file_rec new_file(temp_f, 0, true, (int)s->value.var);
+	outer_file = &aprepro.ap_file_list.top();
+        aprepro.ap_file_list.push(new_file);
 
         tmp_file = new std::fstream(temp_f, std::ios::out);
         loop_lvl++;
         BEGIN(LOOP);
       }
     }
-    aprepro.ap_file_list.top().lineno++;
     aprepro.isCollectingLoop = true;
   }
 }
 
 <LOOP>{
   {WS}"{"[Ee]"nd"[Ll]"oop".*"\n" {
-    aprepro.ap_file_list.top().lineno++;
+    outer_file->lineno++;
     if(loop_lvl > 0)
       --loop_lvl;
 
@@ -243,7 +219,7 @@ integer {D}+({E})?
   {WS}"{"[Ll]"oop"{WS}"(".*"\n"  {
     loop_lvl++; /* Nested Loop */
     (*tmp_file) << yytext;
-    aprepro.ap_file_list.top().lineno++;
+    outer_file->lineno++;
   }
 
   {WS}"{"[Aa]"bort"[Ll]"oop".*"\n" {
@@ -269,7 +245,7 @@ integer {D}+({E})?
 
   .*"\n" {
     (*tmp_file) << yytext;
-    aprepro.ap_file_list.top().lineno++;
+    outer_file->lineno++;
   }
 }
 
@@ -304,8 +280,8 @@ integer {D}+({E})?
     }
   }
 
-  .*"\n" {
-    aprepro.ap_file_list.top().lineno++;
+  .*"\n" { /* Do not increment line count */ 
+    ;
   }
 }
 
@@ -317,7 +293,6 @@ integer {D}+({E})?
 }
 
 <INITIAL,END_CASE_SKIP>{WS}"{"{WS}"default"{WS}"}".*"\n"     {
- aprepro.ap_file_list.top().lineno++;
  if (!switch_active) {
     yyerror("default statement found outside switch statement.");
   }
@@ -521,7 +496,6 @@ integer {D}+({E})?
 }
 
 {WS}"{"[Ee]"nd"[Ii]"f}".*"\n"     {
-    aprepro.ap_file_list.top().lineno++;
 
     if(YY_START == VERBATIM) {
       if(echo) ECHO;
@@ -543,6 +517,7 @@ integer {D}+({E})?
       }
       /* Ignore endif if not skipping */
     }
+    aprepro.ap_file_list.top().lineno++;
   }
 
 <INITIAL>{WS}"{"[Ii]"nclude"{WS}"("           { BEGIN(GET_FILENAME);
@@ -550,6 +525,7 @@ integer {D}+({E})?
 <INITIAL>{WS}"{"[Cc]"include"{WS}"("          { BEGIN(GET_FILENAME);
                              file_must_exist = false; }
 <GET_FILENAME>.+")"{WS}"}"{NL}* {
+  aprepro.ap_file_list.top().lineno++;
   BEGIN(INITIAL);
   {
     symrec *s;
@@ -597,7 +573,7 @@ integer {D}+({E})?
            symrec *s;
                              s = aprepro.getsym(yytext);
                              if (s == nullptr)
-                               s = aprepro.putsym (yytext, SEAMS::Aprepro::SYMBOL_TYPE::UNDEFINED_VARIABLE, 0);
+                               s = aprepro.putsym (yytext, SEAMS::Aprepro::SYMBOL_TYPE::UNDEFINED_VARIABLE, false);
                              yylval->tptr = s;
                              return((token::yytokentype)s->type);
                            }
@@ -718,7 +694,18 @@ integer {D}+({E})?
     aprepro.outputStream.push(out);
   }
 
-  Scanner::~Scanner() {}
+  Scanner::~Scanner() {
+    while (aprepro.ap_file_list.size() > 1) {
+      auto kk = aprepro.ap_file_list.top();
+      if (kk.name != "STDIN") {
+	yyFlexLexer::yy_load_buffer_state();
+	delete yyin;
+	yyin = nullptr;
+      }
+      aprepro.ap_file_list.pop();
+      yyFlexLexer::yypop_buffer_state();
+    };
+  }
 
   void Scanner::add_include_file(const std::string &filename, bool must_exist)
   {
@@ -769,13 +756,13 @@ integer {D}+({E})?
     }
 
     if (aprepro.ap_options.interactive && yyin == &std::cin && isatty(0) != 0 && isatty(1) != 0) {
-      char *line = getline_int(nullptr);
+      char *line = ap_getline_int(nullptr);
 
       if (strlen(line) == 0) {
         return 0;
       }
 
-      gl_histadd(line);
+      ap_gl_histadd(line);
 
       if (strlen(line) > (size_t)max_size - 2) {
         yyerror("input line is too long");

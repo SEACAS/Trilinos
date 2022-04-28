@@ -1,40 +1,15 @@
-// Copyright(C) 1999-2017, 2020 National Technology & Engineering Solutions
+// Copyright(C) 1999-2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
-#ifndef IOSS_Ioss_Utils_h
-#define IOSS_Ioss_Utils_h
+#pragma once
 
 #include <Ioss_CodeTypes.h>
 #include <Ioss_Field.h>
+#include <Ioss_Property.h>
+#include <Ioss_Sort.h>
 #include <algorithm> // for sort, lower_bound, copy, etc
 #include <cassert>
 #include <cmath>
@@ -46,18 +21,15 @@
 #include <string>    // for string
 #include <vector>    // for vector
 namespace Ioss {
+  class DatabaseIO;
   class Field;
-} // namespace Ioss
-namespace Ioss {
   class GroupingEntity;
   class Region;
   class SideBlock;
   class PropertyManager;
-  struct MeshCopyOptions;
 } // namespace Ioss
 
 #define IOSS_ERROR(errmsg) throw std::runtime_error((errmsg).str())
-#define IOSS_WARNING std::cerr
 
 namespace {
   // SEE: http://lemire.me/blog/2017/04/10/removing-duplicates-from-lists-quickly
@@ -84,7 +56,6 @@ namespace {
 } // namespace
 
 namespace Ioss {
-
   /* \brief Utility methods.
    */
   class Utils
@@ -93,13 +64,60 @@ namespace Ioss {
     Utils()  = default;
     ~Utils() = default;
 
+    /**
+     * \defgroup IossStreams Streams used for IOSS output
+     *@{
+     */
+    static std::ostream
+        *m_outputStream; ///< general informational output (very rare). Default std::cerr
+    static std::ostream *m_debugStream;   ///< debug output when requested. Default std::cerr
+    static std::ostream *m_warningStream; ///< IOSS warning output. Default std::cerr
+    static std::string m_preWarningText;  ///< is a string that prepends all warning message output.
+                                          ///< Default is "\nIOSS WARNING: "
+
+    /** \brief set the stream for all streams (output, debug, and warning) to the specified
+     * `out_stream`
+     */
+    static void set_all_streams(std::ostream &out_stream)
+    {
+      m_outputStream  = &out_stream;
+      m_debugStream   = &out_stream;
+      m_warningStream = &out_stream;
+    }
+
+    /** \brief set the output stream to the specified `output_stream`
+     */
+    static void set_output_stream(std::ostream &output_stream) { m_outputStream = &output_stream; }
+
+    /** \brief set the debug stream to the specified `debug_stream`
+     */
+    static void set_debug_stream(std::ostream &debug_stream) { m_debugStream = &debug_stream; }
+
+    /** \brief set the warning stream to the specified `warning_stream`
+     */
+    static void set_warning_stream(std::ostream &warning_stream)
+    {
+      m_warningStream = &warning_stream;
+    }
+
+    /** \brief set the pre-warning text
+     * Sets the text output prior to a warning to the specified text.
+     * Pass an empty string to disable this.  Default is `"\nIOSS WARNING: "`
+     */
+    static void set_pre_warning_text(const std::string &text) { m_preWarningText = text; }
+    /** @}*/
+
     static void check_dynamic_cast(const void *ptr)
     {
       if (ptr == nullptr) {
-        std::cerr << "INTERNAL ERROR: Invalid dynamic cast returned nullptr\n";
-        exit(EXIT_FAILURE);
+        std::ostringstream errmsg;
+        errmsg << "INTERNAL ERROR: Invalid dynamic cast returned nullptr\n";
+        IOSS_ERROR(errmsg);
       }
     }
+
+    /** \brief guess file type from extension */
+    static std::string get_type_from_file(const std::string &filename);
 
     template <typename T> static void uniquify(std::vector<T> &vec, bool skip_first = false)
     {
@@ -107,7 +125,7 @@ namespace Ioss {
       if (skip_first) {
         it++;
       }
-      std::sort(it, vec.end());
+      Ioss::sort(it, vec.end());
       vec.resize(unique(vec, skip_first));
       vec.shrink_to_fit();
     }
@@ -144,13 +162,13 @@ namespace Ioss {
           return p - 1;
         }
       }
-      std::cerr << "FATAL ERROR: find_index_location. Searching for " << node << " in:\n";
+      std::ostringstream errmsg;
+      errmsg << "FATAL ERROR: find_index_location. Searching for " << node << " in:\n";
       for (auto idx : index) {
-        std::cerr << idx << ", ";
+        errmsg << idx << ", ";
       }
-      std::cerr << "\n";
-      assert(1 == 0); // Cannot happen...
-      return 0;
+      errmsg << "\n";
+      IOSS_ERROR(errmsg);
 #else
       return std::distance(index.begin(), std::upper_bound(index.begin(), index.end(), node)) - 1;
 #endif
@@ -188,7 +206,7 @@ namespace Ioss {
      * (1,234,567,890 would return 13)
      * Typically used with the `fmt::print()` functions as:
      * ```
-     * fmt::print("{:{}n}", number, number_width(number,true))
+     * fmt::print("{:{}}", number, number_width(number,true))
      * fmt::print("{:{}d}", number, number_width(number,false))
      * ```
      */
@@ -262,8 +280,8 @@ namespace Ioss {
 
     static std::string decode_filename(const std::string &filename, int processor,
                                        int num_processors);
-    static size_t      get_number(const std::string &suffix);
-    static int64_t     extract_id(const std::string &name_id);
+    static int         get_number(const std::string &suffix);
+    static int         extract_id(const std::string &name_id);
     static std::string encode_entity_name(const std::string &entity_type, int64_t id);
 
     /** \brief create a string that describes the list of input `ids` collapsing ranges if possible.
@@ -275,8 +293,8 @@ namespace Ioss {
      * string `1..3, 5..8`
      */
     static std::string format_id_list(const std::vector<size_t> &ids,
-                                      const std::string &        rng_sep = " to ",
-                                      const std::string &        seq_sep = ", ");
+                                      const std::string         &rng_sep = " to ",
+                                      const std::string         &seq_sep = ", ");
 
     /** \brief Convert a string to lower case, and convert spaces to `_`.
      *
@@ -393,15 +411,14 @@ namespace Ioss {
     static std::string local_filename(const std::string &relative_filename, const std::string &type,
                                       const std::string &working_directory);
 
-    static void get_fields(int64_t entity_count, char **names, size_t num_names,
-                           Ioss::Field::RoleType fld_role, bool enable_field_recognition,
-                           char suffix_separator, int *local_truth,
+    static void get_fields(int64_t entity_count, char **names, int num_names,
+                           Ioss::Field::RoleType fld_role, const DatabaseIO *db, int *local_truth,
                            std::vector<Ioss::Field> &fields);
 
     static int field_warning(const Ioss::GroupingEntity *ge, const Ioss::Field &field,
                              const std::string &inout);
 
-    static void calculate_sideblock_membership(IntVector &face_is_member, const SideBlock *ef_blk,
+    static void calculate_sideblock_membership(IntVector &face_is_member, const SideBlock *sb,
                                                size_t int_byte_size, const void *element,
                                                const void *sides, int64_t number_sides,
                                                const Region *region);
@@ -474,10 +491,22 @@ namespace Ioss {
      */
     static void generate_history_mesh(Ioss::Region *region);
 
-    //! Copy the mesh in `region` to `output_region`.  Behavior can be controlled
-    //! via options in `options`
-    static void copy_database(Ioss::Region &region, Ioss::Region &output_region,
-                              Ioss::MeshCopyOptions &options);
+    static void info_fields(const Ioss::GroupingEntity *ige, Ioss::Field::RoleType role,
+                            const std::string &header, const std::string &suffix = "\n\t");
+
+    static void info_property(const Ioss::GroupingEntity *ige, Ioss::Property::Origin origin,
+                              const std::string &header, const std::string &suffix = "\n\t",
+                              bool print_empty = false);
   };
+
+  inline std::ostream &OUTPUT() { return *Utils::m_outputStream; }
+
+  inline std::ostream &DEBUG() { return *Utils::m_debugStream; }
+
+  inline std::ostream &WARNING()
+  {
+    *Utils::m_warningStream << Utils::m_preWarningText;
+    return *Utils::m_warningStream;
+  }
+
 } // namespace Ioss
-#endif

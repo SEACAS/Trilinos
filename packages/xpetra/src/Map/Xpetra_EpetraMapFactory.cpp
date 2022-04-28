@@ -142,7 +142,7 @@ namespace Xpetra {
     Teuchos::RCP<Map<int, int, EpetraNode> >
     MapFactory<int, int, EpetraNode>::
     Build(const Teuchos::RCP<const Map<int, int, EpetraNode> >& map,
-          int                                                   numDofPerNode)
+          const int numDofPerNode, const int gidOffset)
     {
       XPETRA_MONITOR("MapFactory::Build");
 
@@ -154,14 +154,14 @@ namespace Xpetra {
         return rcp(new BlockedMap<LocalOrdinal, GlobalOrdinal, Node>(*bmap));
       }
 
-      LocalOrdinal N = Teuchos::as<LocalOrdinal>(map->getNodeNumElements());
-      Teuchos::ArrayView<const GlobalOrdinal> oldElements = map->getNodeElementList();
-      Teuchos::Array<GlobalOrdinal> newElements(map->getNodeNumElements()*numDofPerNode);
+      LocalOrdinal N = Teuchos::as<LocalOrdinal>(map->getLocalNumElements());
+      Teuchos::ArrayView<const GlobalOrdinal> oldElements = map->getLocalElementList();
+      Teuchos::Array<GlobalOrdinal> newElements(map->getLocalNumElements()*numDofPerNode);
       for (LocalOrdinal i = 0; i < N; i++)
       {
         for (LocalOrdinal j = 0; j < numDofPerNode; j++)
         {
-          newElements[i*numDofPerNode + j] = oldElements[i]*numDofPerNode + j;
+          newElements[i*numDofPerNode + j] = oldElements[i]*numDofPerNode + j + gidOffset;
         }
       }
 
@@ -487,9 +487,9 @@ namespace Xpetra {
         return rcp(new Xpetra::BlockedMap<LocalOrdinal, GlobalOrdinal, Node>(*bmap));
       }
 
-      LocalOrdinal N = map->getNodeNumElements();
-      Teuchos::ArrayView<const GlobalOrdinal> oldElements = map->getNodeElementList();
-      Teuchos::Array<GlobalOrdinal> newElements(map->getNodeNumElements()*numDofPerNode);
+      LocalOrdinal N = map->getLocalNumElements();
+      Teuchos::ArrayView<const GlobalOrdinal> oldElements = map->getLocalElementList();
+      Teuchos::Array<GlobalOrdinal> newElements(map->getLocalNumElements()*numDofPerNode);
       for (LocalOrdinal i = 0; i < N; i++)
         for (LocalOrdinal j = 0; j < numDofPerNode; j++)
           newElements[i*numDofPerNode + j] = oldElements[i]*numDofPerNode + j;

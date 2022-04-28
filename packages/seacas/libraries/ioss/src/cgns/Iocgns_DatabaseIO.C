@@ -4,50 +4,18 @@
 // * Single Base.
 // * ZoneGridConnectivity is 1to1 with point lists for unstructured
 
-// Copyright(C) 1999-2017, 2020 National Technology & Engineering Solutions
+// Copyright(C) 1999-2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-#include <cgns/Iocgns_Defines.h>
+// See packages/seacas/LICENSE for details
 
 #include <Ioss_CodeTypes.h>
+#include <Ioss_Sort.h>
 #include <Ioss_Utils.h>
 #include <bitset>
 #include <cgns/Iocgns_DatabaseIO.h>
 #include <cgns/Iocgns_Utils.h>
-#ifdef SEACAS_HAVE_MPI
-#include <pcgnslib.h>
-#else
-#include <cgnslib.h>
-#endif
 #include <cstddef>
 #include <ctime>
 #include <fmt/ostream.h>
@@ -55,48 +23,33 @@
 #include <iostream>
 #include <numeric>
 #include <string>
+#if !defined(__IOSS_WINDOWS__)
 #include <sys/select.h>
+#endif
 #include <tokenize.h>
 #include <vector>
+
+#include <cgnslib.h>
+#if CG_BUILD_PARALLEL
+#include <pcgnslib.h>
+#endif
+
+#include <cgns/Iocgns_Defines.h>
 
 #if !defined(CGNSLIB_H)
 #error "Could not include cgnslib.h"
 #endif
 
-#include "Ioss_CommSet.h"
-#include "Ioss_DBUsage.h"
-#include "Ioss_DatabaseIO.h"
-#include "Ioss_EdgeBlock.h"
-#include "Ioss_EdgeSet.h"
-#include "Ioss_ElementBlock.h"
-#include "Ioss_ElementSet.h"
-#include "Ioss_ElementTopology.h"
-#include "Ioss_EntityType.h"
-#include "Ioss_FaceBlock.h"
-#include "Ioss_FaceGenerator.h"
-#include "Ioss_FaceSet.h"
-#include "Ioss_Field.h"
 #include "Ioss_FileInfo.h"
 #include "Ioss_Hex8.h"
-#include "Ioss_IOFactory.h"
-#include "Ioss_NodeBlock.h"
-#include "Ioss_NodeSet.h"
-#include "Ioss_ParallelUtils.h"
-#include "Ioss_Property.h"
 #include "Ioss_Quad4.h"
-#include "Ioss_Region.h"
-#include "Ioss_SideBlock.h"
-#include "Ioss_SideSet.h"
 #include "Ioss_SmartAssert.h"
-#include "Ioss_State.h"
-#include "Ioss_StructuredBlock.h"
-#include "Ioss_Utils.h"
-#include "Ioss_VariableType.h"
+#include "Ioss_SubSystem.h"
 
-extern char hdf5_access[64];
+// extern char hdf5_access[64];
 
 namespace {
-  size_t global_to_zone_local_idx(size_t i, const Ioss::Map *block_map, Ioss::Map &nodeMap,
+  size_t global_to_zone_local_idx(size_t i, const Ioss::Map *block_map, const Ioss::Map &nodeMap,
                                   bool isParallel)
   {
     auto global = block_map->map()[i + 1]; // 1-based index over all nodes in model (all procs)
@@ -106,7 +59,7 @@ namespace {
     return global - 1;
   }
 
-#ifdef SEACAS_HAVE_MPI
+#if CG_BUILD_PARALLEL
   bool has_decomp_descriptor(int cgns_file_ptr, int base, int zone, int zgc_idx)
   {
     bool has_decomp_flag = false;
@@ -128,6 +81,42 @@ namespace {
       }
     }
     return has_decomp_flag;
+  }
+
+  bool has_decomp_name_kluge(int cgns_file_ptr, int base, int zone, int zgc_idx)
+  {
+    // Check the `zgc_idx`-th ZGC node to see if the name matches the
+    // form described in the `name_is_decomp` function below.  We want to
+    // see if there are *any* names that match this form and if so, we can
+    // use the kluge; otherwise we can't and need to rely on other hueristics.
+    char                    connectname[CGNS_MAX_NAME_LENGTH + 1];
+    char                    donorname[CGNS_MAX_NAME_LENGTH + 1];
+    std::array<cgsize_t, 6> range;
+    std::array<cgsize_t, 6> donor_range;
+    Ioss::IJK_t             transform;
+
+    cg_1to1_read(cgns_file_ptr, base, zone, zgc_idx, connectname, donorname, range.data(),
+                 donor_range.data(), transform.data());
+
+    std::string name{connectname};
+    bool        has_decomp_name = ((name.find_first_not_of("0123456789_-") == std::string::npos) &&
+                            (name.find("--", 1 != std::string::npos)));
+
+    return has_decomp_name;
+  }
+
+  bool name_is_decomp(const std::string &name)
+  {
+    // Major kluge to deal with fpp files which don't have the
+    // decomp descriptor.  Usually only required if the model is
+    // periodic...
+    //
+    // A zgc name that is generated as part of the decomposition process
+    // has the following characteristics:
+    // * is all [0-9_-] characters
+    // * has "--" in the middle (approx) of the name
+    return ((name.find_first_not_of("0123456789_-") == std::string::npos) &&
+            (name.find("--", 1 != std::string::npos)));
   }
 
   void zgc_check_descriptor(int cgns_file_ptr, int base, int zone, int zgc_idx,
@@ -192,12 +181,12 @@ namespace {
     std::array<int, 3>               offset{{0, 0, 0}};
     std::bitset<6>                   face_adj{};
 
-#ifdef SEACAS_HAVE_MPI
+#if CG_BUILD_PARALLEL
     bool split() const { return face_adj.any(); }
 #endif
   };
 
-#ifdef SEACAS_HAVE_MPI
+#if CG_BUILD_PARALLEL
   void add_zgc_fpp(int cgns_file_ptr, Ioss::StructuredBlock *block,
                    const std::map<std::string, int> &zone_name_map, int myProcessor,
                    bool isParallel)
@@ -233,10 +222,7 @@ namespace {
       Ioss::IJK_t donor_beg{{(int)donor_range[0], (int)donor_range[1], (int)donor_range[2]}};
       Ioss::IJK_t donor_end{{(int)donor_range[3], (int)donor_range[4], (int)donor_range[5]}};
 
-      Ioss::IJK_t offset;
-      offset[0] = block->get_property("offset_i").get_int();
-      offset[1] = block->get_property("offset_j").get_int();
-      offset[2] = block->get_property("offset_k").get_int();
+      Ioss::IJK_t offset = block->get_ijk_offset();
       range_beg[0] += offset[0];
       range_beg[1] += offset[1];
       range_beg[2] += offset[2];
@@ -306,6 +292,15 @@ namespace {
           int    br   = bb;
           do {
             global[ijk] += blocks[br].range[ijk];
+#if IOSS_DEBUG_OUTPUT
+            const auto b = blocks[br];
+            fmt::print(Ioss::DEBUG(), "Min {}: {} {} ({} {} {})  [{}]\n",
+                       (ijk == 0   ? 'i'
+                        : ijk == 1 ? 'j'
+                                   : 'k'),
+                       b.name, b.face_adj[ijk], b.range[0], b.range[1], b.range[2],
+                       b.face_adj.to_string('.', '+'));
+#endif
             br = adjacent_block(blocks[br], ijk + 3, proc_block_map);
             if (++iter > end - begin) {
               auto               bp = adjacent_block(blocks[br], ijk + 3, proc_block_map);
@@ -314,8 +309,11 @@ namespace {
                          "ERROR: CGNS: Block '{}' is in infinite loop calculating processor "
                          "adjacencies for direction "
                          "'{}' on processors {} and {}.  Check decomposition.",
-                         blocks[bb].name, (ijk == 0 ? 'i' : ijk == 1 ? 'j' : 'k'), blocks[bp].proc,
-                         blocks[br].proc);
+                         blocks[bb].name,
+                         (ijk == 0   ? 'i'
+                          : ijk == 1 ? 'j'
+                                     : 'k'),
+                         blocks[bp].proc, blocks[br].proc);
               IOSS_ERROR(errmsg);
             }
           } while (br >= 0);
@@ -364,11 +362,14 @@ namespace {
     // We can unambiguously determine whether a ZGC is from decomp or is
     // normal inter-zone ZGC. If the descriptor does not exist, then have
     // to rely on hueristics...
-    bool has_decomp_flag = false;
+    bool has_decomp_flag  = false;
+    bool has_decomp_names = false;
     for (int i = 0; i < nconn; i++) {
       if (has_decomp_descriptor(cgns_file_ptr, base, zone, i + 1)) {
         has_decomp_flag = true;
-        break;
+      }
+      if (has_decomp_name_kluge(cgns_file_ptr, base, zone, i + 1)) {
+        has_decomp_names = true;
       }
     }
 
@@ -395,7 +396,11 @@ namespace {
         is_from_decomp = has_decomp_descriptor(cgns_file_ptr, base, zone, i + 1);
       }
       else {
-        is_from_decomp = donor_name == zone_name && donor_proc >= 0 && donor_proc != myProcessor;
+#if IOSS_DEBUG_OUTPUT
+        fmt::print("Name: {}, decomp? = {}\n", connectname, name_is_decomp(connectname));
+#endif
+        is_from_decomp = donor_name == zone_name && donor_proc >= 0 && donor_proc != myProcessor &&
+                         (!has_decomp_names || name_is_decomp(connectname));
       }
 
       if (is_from_decomp) {
@@ -517,7 +522,7 @@ namespace {
 namespace Iocgns {
 
   DatabaseIO::DatabaseIO(Ioss::Region *region, const std::string &filename,
-                         Ioss::DatabaseUsage db_usage, MPI_Comm communicator,
+                         Ioss::DatabaseUsage db_usage, Ioss_MPI_Comm communicator,
                          const Ioss::PropertyManager &props)
       : Ioss::DatabaseIO(region, filename, db_usage, communicator, props)
   {
@@ -532,6 +537,14 @@ namespace Iocgns {
       if (properties.exists("FLUSH_INTERVAL")) {
         m_flushInterval = properties.get("FLUSH_INTERVAL").get_int();
       }
+
+      {
+        bool file_per_state = false;
+        Ioss::Utils::check_set_bool_property(properties, "FILE_PER_STATE", file_per_state);
+        if (file_per_state) {
+          set_file_per_state(true);
+        }
+      }
     }
 
     Ioss::DatabaseIO::openDatabase__();
@@ -543,6 +556,10 @@ namespace Iocgns {
       delete gtb.second;
     }
     try {
+      if (m_cgnsBasePtr > 0) {
+        CGCHECKM(cg_close(m_cgnsBasePtr));
+        m_cgnsBasePtr = -1;
+      }
       closeDatabase__();
     }
     catch (...) {
@@ -560,10 +577,17 @@ namespace Iocgns {
   void DatabaseIO::openDatabase__() const
   {
     if (m_cgnsFilePtr < 0) {
+#if 0
+      // This is currently disabled due to a recent change in CGNS
+      // that changed how `hdf5_access` was dealt with...  Since
+      // memory_read and memory_write are experimental in SEACAS/IOSS,
+      // I disabled until we can determine how best to handle this in
+      // current CGNS.
       if ((is_input() && properties.exists("MEMORY_READ")) ||
           (!is_input() && properties.exists("MEMORY_WRITE"))) {
-        Ioss::Utils::copy_string(hdf5_access, "PARALLEL");
+	Ioss::Utils::copy_string(hdf5_access, "PARALLEL");
       }
+#endif
 
       CGCHECKM(cg_set_file_type(CG_FILE_HDF5));
 
@@ -575,7 +599,8 @@ namespace Iocgns {
         }
         else {
           // Check whether appending to existing file...
-          if (open_create_behavior() == Ioss::DB_APPEND) {
+          if (open_create_behavior() == Ioss::DB_APPEND ||
+              open_create_behavior() == Ioss::DB_MODIFY) {
             // Append to file if it already exists -- See if the file exists.
             Ioss::FileInfo file = Ioss::FileInfo(decoded_filename());
             if (file.exists()) {
@@ -585,8 +610,8 @@ namespace Iocgns {
         }
       }
 
-#ifdef SEACAS_HAVE_MPI
-      cgp_mpi_comm(MPI_COMM_SELF);
+#if CG_BUILD_PARALLEL
+      cgp_mpi_comm(Ioss::ParallelUtils::comm_self());
       int ierr = cgp_open(decoded_filename().c_str(), mode, &m_cgnsFilePtr);
       cgp_mpi_comm(util().communicator());
 #else
@@ -594,10 +619,12 @@ namespace Iocgns {
 #endif
       // Will not return if error...
       check_valid_file_open(ierr);
+#if 0
       if ((is_input() && properties.exists("MEMORY_READ")) ||
           (!is_input() && properties.exists("MEMORY_WRITE"))) {
         Ioss::Utils::copy_string(hdf5_access, "NATIVE");
       }
+#endif
 
       if (properties.exists("INTEGER_SIZE_API")) {
         int isize = properties.get("INTEGER_SIZE_API").get_int();
@@ -683,13 +710,13 @@ namespace Iocgns {
       }
       if (status != CG_OK) {
         if (ok_count != 0 || util().parallel_size() <= 2) {
-          fmt::print(stderr, "[{}] CGNS Error: '{}'\n", myProcessor, cg_get_error());
+          fmt::print(errmsg, "[{}] CGNS Error: '{}'\n", myProcessor, cg_get_error());
         }
         else {
           // Since error on all processors, assume the same error on all and only print
           // the error from processor 0.
           if (myProcessor == 0) {
-            fmt::print(stderr, "CGNS Error: '{}'\n", cg_get_error());
+            fmt::print(errmsg, "CGNS Error: '{}'\n", cg_get_error());
           }
         }
       }
@@ -711,7 +738,14 @@ namespace Iocgns {
     }
 
     if (!m_dbFinalized) {
-      Utils::finalize_database(get_file_pointer(), m_timesteps, get_region(), myProcessor, false);
+      int file_ptr;
+      if (get_file_per_state()) {
+        file_ptr = m_cgnsBasePtr;
+      }
+      else {
+        file_ptr = get_file_pointer();
+      }
+      Utils::finalize_database(file_ptr, m_timesteps, get_region(), myProcessor, false);
       m_dbFinalized = true;
     }
   }
@@ -728,7 +762,7 @@ namespace Iocgns {
     SMART_ASSERT(isParallel);
     PAR_UNUSED(base);
     PAR_UNUSED(num_zones);
-#ifdef SEACAS_HAVE_MPI
+#if CG_BUILD_PARALLEL
     // Each processor may have a different set of zones.  This routine
     // will sync the information such that at return, each procesosr
     // has a consistent set of structuredBlocks defined with the
@@ -809,7 +843,7 @@ namespace Iocgns {
       all_adj.shrink_to_fit();
 
       // Sort blocks to get similar zones adjacent -- will have same name, but different proc
-      std::sort(blocks.begin(), blocks.end(), [](const SBlock &b1, const SBlock &b2) {
+      Ioss::sort(blocks.begin(), blocks.end(), [](const SBlock &b1, const SBlock &b2) {
         return (b1.name == b2.name ? b1.proc < b2.proc : b1.name < b2.name);
       });
 
@@ -841,8 +875,8 @@ namespace Iocgns {
           set_block_offset(bbeg, bend, blocks, proc_block_map);
 
 #if IOSS_DEBUG_OUTPUT
-          fmt::print(stderr, "Range of blocks for {} is {} to {} Global I,J,K = {} {} {}\n", b.name,
-                     i, j - 1, b.glob_range[0], b.glob_range[1], b.glob_range[2]);
+          fmt::print(Ioss::DEBUG(), "Range of blocks for {} is {} to {} Global I,J,K = {} {} {}\n",
+                     b.name, i, j - 1, b.glob_range[0], b.glob_range[1], b.glob_range[2]);
 #endif
           // All processors need to know about it...
           for (int p = 0; p < proc_count; p++) {
@@ -884,10 +918,10 @@ namespace Iocgns {
 
 #if IOSS_DEBUG_OUTPUT
       for (const auto &b : resolved_blocks) {
-        fmt::print(stderr, "{} {} {} ({} {} {}) ({} {} {}) ({} {} {}) [{}]\n", b.name, b.proc,
-                   b.local_zone, b.range[0], b.range[1], b.range[2], b.glob_range[0],
+        fmt::print(Ioss::DEBUG(), "{} {} {} ({} {} {}) ({} {} {}) ({} {} {}) [{}]\n", b.name,
+                   b.proc, b.local_zone, b.range[0], b.range[1], b.range[2], b.glob_range[0],
                    b.glob_range[1], b.glob_range[2], b.offset[0], b.offset[1], b.offset[2],
-                   b.face_adj);
+                   b.face_adj.to_string('.', '+'));
       }
 #endif
 
@@ -912,11 +946,10 @@ namespace Iocgns {
       }
       SMART_ASSERT(id % OUT_INT_PER_ZONE == 0);
     }
-    MPI_Bcast(&tot_zones, 1, MPI_INT, 0, util().communicator());
+    util().broadcast(tot_zones);
     zone_data.resize(tot_zones * OUT_INT_PER_ZONE);
     all_names.resize(tot_zones * (CGNS_MAX_NAME_LENGTH + 1));
-    MPI_Bcast(all_names.data(), tot_zones * (CGNS_MAX_NAME_LENGTH + 1), MPI_CHAR, 0,
-              util().communicator());
+    util().broadcast(all_names);
     MPI_Scatter(all_data.data(), tot_zones * OUT_INT_PER_ZONE, MPI_INT, zone_data.data(),
                 tot_zones * OUT_INT_PER_ZONE, MPI_INT, 0, util().communicator());
 
@@ -967,6 +1000,9 @@ namespace Iocgns {
         Utils::add_structured_boundary_conditions(get_file_pointer(), block, false);
       }
 
+      // See if this zone/block is a member of any assemblies...
+      Utils::add_to_assembly(get_file_pointer(), get_region(), block, base, zone);
+
       // Need to get a count of number of unique BC's.
       // Note that possible to assign multiple BC to a single face, so can't do this based on faces
       // Assume that if a BC is on multiple processors, then its name will be the same on all
@@ -1004,10 +1040,9 @@ namespace Iocgns {
           in_bc += CGNS_MAX_NAME_LENGTH + 1;
         }
       }
-      MPI_Bcast(&tot_names, 1, MPI_INT, 0, util().communicator());
+      util().broadcast(tot_names);
       bc_names.resize(tot_names * (CGNS_MAX_NAME_LENGTH + 1));
-      MPI_Bcast(bc_names.data(), tot_names * (CGNS_MAX_NAME_LENGTH + 1), MPI_CHAR, 0,
-                util().communicator());
+      util().broadcast(bc_names);
 
       std::vector<std::string> bc;
       int                      off_name = 0;
@@ -1039,10 +1074,56 @@ namespace Iocgns {
         }
       }
 
-      std::sort(block->m_boundaryConditions.begin(), block->m_boundaryConditions.end(),
-                [](const Ioss::BoundaryCondition &b1, const Ioss::BoundaryCondition &b2) {
-                  return (b1.m_bcName < b2.m_bcName);
-                });
+      Ioss::sort(block->m_boundaryConditions.begin(), block->m_boundaryConditions.end(),
+                 [](const Ioss::BoundaryCondition &b1, const Ioss::BoundaryCondition &b2) {
+                   return (b1.m_bcName < b2.m_bcName);
+                 });
+    }
+
+    // Need to iterate the blocks again and make the assembly information consistent
+    // across processors.
+    // If a block belongs to an assembly, it will have the property "assembly"
+    // defined on it.
+    // This assumes that a block can belong to at most one assembly.
+    const auto &assemblies = get_region()->get_assemblies();
+    if (!assemblies.empty()) {
+      std::map<unsigned int, std::string> assembly_hash_map;
+      for (const auto &assem : assemblies) {
+        auto hash               = Ioss::Utils::hash(assem->name());
+        assembly_hash_map[hash] = assem->name();
+      }
+
+      const auto               &blocks = get_region()->get_structured_blocks();
+      std::vector<unsigned int> assem_ids;
+      assem_ids.reserve(blocks.size());
+
+      for (const auto &sb : blocks) {
+        unsigned int hash = 0;
+        if (sb->property_exists("assembly")) {
+          std::string assembly = sb->get_property("assembly").get_string();
+          hash                 = Ioss::Utils::hash(assembly);
+        }
+        assem_ids.push_back(hash);
+      }
+
+      // Hash will be >= 0, so we will take the maximum over all
+      // ranks and that will give the assembly (if any) that each block belongs to.
+      util().global_array_minmax(assem_ids, Ioss::ParallelUtils::DO_MAX);
+
+      int idx = 0;
+      for (const auto &sb : blocks) {
+        unsigned    assem_hash = assem_ids[idx++];
+        std::string name       = assembly_hash_map[assem_hash];
+        auto       *assembly   = get_region()->get_assembly(name);
+        assert(assembly != nullptr);
+        if (!sb->property_exists("assembly")) {
+          assembly->add(sb);
+          Ioss::StructuredBlock *new_sb = const_cast<Ioss::StructuredBlock *>(sb);
+          new_sb->property_add(Ioss::Property("assembly", assembly->name()));
+        }
+        SMART_ASSERT(sb->get_property("assembly").get_string() == assembly->name())
+        (sb->get_property("assembly").get_string())(assembly->name());
+      }
     }
 #endif
   }
@@ -1079,9 +1160,8 @@ namespace Iocgns {
 
     int index_dim = 0;
     CGCHECKM(cg_index_dim(get_file_pointer(), base, zone, &index_dim));
-    // An Ioss::StructuredBlock corresponds to a CG_Structured zone...
-    Ioss::StructuredBlock *block =
-        new Ioss::StructuredBlock(this, zname, index_dim, size[3], size[4], size[5]);
+    // An Ioss::StructuredBlock corresponds to a CGNS_ENUMV(Structured) zone...
+    auto *block = new Ioss::StructuredBlock(this, zname, index_dim, size[3], size[4], size[5]);
 
     block->property_add(Ioss::Property("base", base));
     block->property_add(Ioss::Property("db_zone", zone));
@@ -1129,6 +1209,9 @@ namespace Iocgns {
 
     // Handle boundary conditions...
     Utils::add_structured_boundary_conditions(get_file_pointer(), block, false);
+
+    // See if this zone/block is a member of any assemblies...
+    Utils::add_to_assembly(get_file_pointer(), get_region(), block, base, zone);
   }
 
   size_t DatabaseIO::finalize_structured_blocks()
@@ -1164,8 +1247,29 @@ namespace Iocgns {
       for (auto &conn : block->m_zoneConnectivity) {
         if (conn.m_donorZone < 0) {
           auto donor_iter = m_zoneNameMap.find(conn.m_donorName);
-          SMART_ASSERT(donor_iter != m_zoneNameMap.end());
-          conn.m_donorZone = (*donor_iter).second;
+          if (donor_iter == m_zoneNameMap.end()) {
+            if (proc_count == 1) {
+              // This is most likely a parallel decomposed model, but only a single
+              // part is being accessed.  Do the best we can without being able to
+              // access the data on the other processor files...
+              auto zname_proc       = Iocgns::Utils::decompose_name(conn.m_donorName, true);
+              conn.m_donorProcessor = zname_proc.second;
+              auto donor_block      = get_region()->get_structured_block(zname_proc.first);
+              if (donor_block != nullptr) {
+                conn.m_donorZone = Iocgns::Utils::get_db_zone(donor_block);
+              }
+              else {
+                // Since we are only accessing a single file in a decomposed
+                // set of fpp files, we can't access the donor zone on the
+                // other processor(s), so we have to set the ZGC to inactive.
+                conn.m_isActive = false;
+              }
+            }
+          }
+          else {
+            SMART_ASSERT(donor_iter != m_zoneNameMap.end());
+            conn.m_donorZone = (*donor_iter).second;
+          }
         }
         if (proc_count > 1) {
           int         offset = (conn.m_donorProcessor * blocks.size() + (conn.m_donorZone - 1)) * 3;
@@ -1203,25 +1307,24 @@ namespace Iocgns {
     if (zone > 1) { // Donor zone is always lower numbered, so zone 1 has no donor zone.
       int nconn = 0;
       CGCHECKM(cg_nconns(get_file_pointer(), base, zone, &nconn));
-      cgsize_t num_shared = 0;
       for (int i = 0; i < nconn; i++) {
-        char                      connectname[CGNS_MAX_NAME_LENGTH + 1];
-        CG_GridLocation_t         location;
-        CG_GridConnectivityType_t connect_type;
-        CG_PointSetType_t         ptset_type;
-        cgsize_t                  npnts = 0;
-        char                      donorname[CGNS_MAX_NAME_LENGTH + 1];
-        CG_ZoneType_t             donor_zonetype;
-        CG_PointSetType_t         donor_ptset_type;
-        CG_DataType_t             donor_datatype;
-        cgsize_t                  ndata_donor;
+        char connectname[CGNS_MAX_NAME_LENGTH + 1];
+        CGNS_ENUMT(GridLocation_t) location;
+        CGNS_ENUMT(GridConnectivityType_t) connect_type;
+        CGNS_ENUMT(PointSetType_t) ptset_type;
+        cgsize_t npnts = 0;
+        char     donorname[CGNS_MAX_NAME_LENGTH + 1];
+        CGNS_ENUMT(ZoneType_t) donor_zonetype;
+        CGNS_ENUMT(PointSetType_t) donor_ptset_type;
+        CGNS_ENUMT(DataType_t) donor_datatype;
+        cgsize_t ndata_donor;
 
         CGCHECKM(cg_conn_info(get_file_pointer(), base, zone, i + 1, connectname, &location,
                               &connect_type, &ptset_type, &npnts, donorname, &donor_zonetype,
                               &donor_ptset_type, &donor_datatype, &ndata_donor));
 
-        if (connect_type != CG_Abutting1to1 || ptset_type != CG_PointList ||
-            donor_ptset_type != CG_PointListDonor) {
+        if (connect_type != CGNS_ENUMV(Abutting1to1) || ptset_type != CGNS_ENUMV(PointList) ||
+            donor_ptset_type != CGNS_ENUMV(PointListDonor)) {
           std::ostringstream errmsg;
           fmt::print(errmsg,
                      "ERROR: CGNS: Zone {} adjacency data is not correct type. Require "
@@ -1244,7 +1347,6 @@ namespace Iocgns {
         // A "previous" zone will have a lower zone number this this zone...
         auto donor_iter = m_zoneNameMap.find(donorname);
         if (donor_iter != m_zoneNameMap.end() && (*donor_iter).second < zone) {
-          num_shared += npnts;
 #if IOSS_DEBUG_OUTPUT
           fmt::print("Zone {} shares {} nodes with {}\n", zone, npnts, donorname);
 #endif
@@ -1266,7 +1368,7 @@ namespace Iocgns {
       }
     }
 
-    auto & block_map = m_blockLocalNodeMap[zone];
+    auto  &block_map = m_blockLocalNodeMap[zone];
     size_t offset    = num_node;
     for (size_t i = 0; i < total_block_nodes; i++) {
       if (block_map[i] == -1) {
@@ -1299,12 +1401,12 @@ namespace Iocgns {
     Ioss::ElementBlock *eblock = nullptr;
 
     for (int is = 1; is <= num_sections; is++) {
-      char             section_name[CGNS_MAX_NAME_LENGTH + 1];
-      CG_ElementType_t e_type;
-      cgsize_t         el_start    = 0;
-      cgsize_t         el_end      = 0;
-      int              num_bndry   = 0;
-      int              parent_flag = 0;
+      char section_name[CGNS_MAX_NAME_LENGTH + 1];
+      CGNS_ENUMT(ElementType_t) e_type;
+      cgsize_t el_start    = 0;
+      cgsize_t el_end      = 0;
+      int      num_bndry   = 0;
+      int      parent_flag = 0;
 
       // Get the type of elements in this section...
       CGCHECKM(cg_section_read(get_file_pointer(), base, zone, is, section_name, &e_type, &el_start,
@@ -1328,6 +1430,9 @@ namespace Iocgns {
         eblock->property_add(Ioss::Property("section", is));
         eblock->property_add(Ioss::Property("node_count", (int64_t)total_block_nodes));
         eblock->property_add(Ioss::Property("original_block_order", zone));
+
+        // See if this zone/block is a member of any assemblies...
+        Utils::add_to_assembly(get_file_pointer(), get_region(), eblock, base, zone);
 
         SMART_ASSERT(is == 1); // For now, assume each zone has only a single element block.
         bool added = get_region()->add(eblock);
@@ -1396,17 +1501,27 @@ namespace Iocgns {
     CGCHECKM(cg_nbases(get_file_pointer(), &n_bases));
     if (n_bases != 1) {
       std::ostringstream errmsg;
-      fmt::print(errmsg,
-                 "CGNS: Too many bases; only support files with a single bases at this time");
+      fmt::print(
+          errmsg,
+          "ERROR: CGNS: Too many bases; only support files with a single bases at this time");
       IOSS_ERROR(errmsg);
     }
 
     get_step_times__();
 
+    if (open_create_behavior() == Ioss::DB_APPEND) {
+      return;
+    }
+
     // ========================================================================
-    // Get the number of families in the mesh...
-    // Will treat these as sidesets if they are of the type "FamilyBC_t"
+    // Get the number of sidesets in the mesh...
+    // Will be the 'families' that are of the type "FamilyBC_t"
     Utils::add_sidesets(get_file_pointer(), this);
+
+    // ========================================================================
+    // Get the number of assemblies in the mesh...
+    // Will be the 'families' that contain nodes of 'FamVC_*'
+    Utils::add_assemblies(get_file_pointer(), this);
 
     // ========================================================================
     // Get the number of zones (element blocks) in the mesh...
@@ -1462,13 +1577,12 @@ namespace Iocgns {
       IOSS_ERROR(errmsg);
     }
 
-    Ioss::NodeBlock *nblock = new Ioss::NodeBlock(this, "nodeblock_1", num_node, phys_dimension);
+    auto *nblock = new Ioss::NodeBlock(this, "nodeblock_1", num_node, phys_dimension);
     nblock->property_add(Ioss::Property("base", base));
     get_region()->add(nblock);
     nodeCount = num_node;
 
-    Utils::add_transient_variables(get_file_pointer(), m_timesteps, get_region(),
-                                   get_field_recognition(), get_field_separator(), myProcessor,
+    Utils::add_transient_variables(get_file_pointer(), m_timesteps, get_region(), myProcessor,
                                    false);
   }
 
@@ -1508,8 +1622,8 @@ namespace Iocgns {
       const auto &I_map = m_globalToBlockLocalNodeMap[zone];
 
       for (auto J = I + 1; J != blocks.end(); J++) {
-        int                   dzone = (*J)->get_property("zone").get_int();
-        const auto &          J_map = m_globalToBlockLocalNodeMap[dzone];
+        int           dzone = (*J)->get_property("zone").get_int();
+        const auto   &J_map = m_globalToBlockLocalNodeMap[dzone];
         CGNSIntVector point_list;
         CGNSIntVector point_list_donor;
         for (size_t i = 0; i < J_map->size(); i++) {
@@ -1529,20 +1643,21 @@ namespace Iocgns {
           int         gc_idx  = 0;
           std::string name    = fmt::format("{}_to_{}", (*I)->name(), (*J)->name());
           const auto &d1_name = (*J)->name();
-          CGCHECKM(cg_conn_write(get_file_pointer(), base, zone, name.c_str(), CG_Vertex,
-                                 CG_Abutting1to1, CG_PointList, point_list.size(),
-                                 point_list.data(), d1_name.c_str(), CG_Unstructured,
-                                 CG_PointListDonor, CG_DataTypeNull, point_list_donor.size(),
-                                 point_list_donor.data(), &gc_idx));
+          CGCHECKM(cg_conn_write(get_file_pointer(), base, zone, name.c_str(), CGNS_ENUMV(Vertex),
+                                 CGNS_ENUMV(Abutting1to1), CGNS_ENUMV(PointList), point_list.size(),
+                                 point_list.data(), d1_name.c_str(), CGNS_ENUMV(Unstructured),
+                                 CGNS_ENUMV(PointListDonor), CGNS_ENUMV(DataTypeNull),
+                                 point_list_donor.size(), point_list_donor.data(), &gc_idx));
 
           name                = fmt::format("{}_to_{}", (*J)->name(), (*I)->name());
           const auto &d2_name = (*I)->name();
 
-          CGCHECKM(cg_conn_write(get_file_pointer(), base, dzone, name.c_str(), CG_Vertex,
-                                 CG_Abutting1to1, CG_PointList, point_list_donor.size(),
-                                 point_list_donor.data(), d2_name.c_str(), CG_Unstructured,
-                                 CG_PointListDonor, CG_DataTypeNull, point_list.size(),
-                                 point_list.data(), &gc_idx));
+          CGCHECKM(cg_conn_write(get_file_pointer(), base, dzone, name.c_str(), CGNS_ENUMV(Vertex),
+                                 CGNS_ENUMV(Abutting1to1), CGNS_ENUMV(PointList),
+                                 point_list_donor.size(), point_list_donor.data(), d2_name.c_str(),
+                                 CGNS_ENUMV(Unstructured), CGNS_ENUMV(PointListDonor),
+                                 CGNS_ENUMV(DataTypeNull), point_list.size(), point_list.data(),
+                                 &gc_idx));
         }
       }
     }
@@ -1554,22 +1669,63 @@ namespace Iocgns {
     return true;
   }
 
+  void DatabaseIO::free_state_pointer()
+  {
+    // If this is the first state file created, then we need to save a reference
+    // to the base CGNS file so we can update the metadata and create links to
+    // the state files.
+    if (m_cgnsBasePtr < 0) {
+      m_cgnsBasePtr = m_cgnsFilePtr;
+      m_cgnsFilePtr = -1;
+    }
+    closeDatabase__();
+  }
+
+  void DatabaseIO::open_state_file(int state)
+  {
+    // Close current state file (if any)...
+    free_state_pointer();
+
+    // Update filename to append state count...
+    decodedFilename.clear();
+
+    Ioss::FileInfo db(originalDBFilename);
+    std::string    new_filename;
+    if (!db.pathname().empty()) {
+      new_filename += db.pathname() + "/";
+    }
+
+    new_filename += fmt::format("{}-SolutionAtStep{:05}.{}", db.basename(), state, db.extension());
+
+    DBFilename = new_filename;
+
+    Iocgns::Utils::write_state_meta_data(get_file_pointer(), *get_region(), false);
+  }
+
   bool DatabaseIO::end__(Ioss::State state)
   {
     // Transitioning out of state 'state'
     switch (state) {
     case Ioss::STATE_DEFINE_MODEL:
-      if (!is_input() && open_create_behavior() != Ioss::DB_APPEND) {
+      if (!is_input() && open_create_behavior() != Ioss::DB_APPEND &&
+          open_create_behavior() != Ioss::DB_MODIFY) {
         write_meta_data();
       }
+      if (!is_input() && (open_create_behavior() == Ioss::DB_APPEND ||
+                          open_create_behavior() == Ioss::DB_MODIFY)) {
+        Utils::update_db_zone_property(m_cgnsFilePtr, get_region(), myProcessor, isParallel, false);
+      }
+
       break;
     case Ioss::STATE_MODEL:
-      if (!is_input() && open_create_behavior() != Ioss::DB_APPEND) {
+      if (!is_input() && open_create_behavior() != Ioss::DB_APPEND &&
+          open_create_behavior() != Ioss::DB_MODIFY) {
         write_adjacency_data();
       }
       break;
     case Ioss::STATE_DEFINE_TRANSIENT:
-      if (!is_input() && open_create_behavior() != Ioss::DB_APPEND) {
+      if (!is_input() && open_create_behavior() != Ioss::DB_APPEND &&
+          open_create_behavior() != Ioss::DB_MODIFY) {
         write_results_meta_data();
       }
       break;
@@ -1586,7 +1742,12 @@ namespace Iocgns {
     if (is_input()) {
       return true;
     }
-    Utils::write_flow_solution_metadata(get_file_pointer(), get_region(), state,
+    if (get_file_per_state()) {
+      // Close current state file (if any); create new state file and output metadata...
+      open_state_file(state);
+      write_results_meta_data();
+    }
+    Utils::write_flow_solution_metadata(get_file_pointer(), m_cgnsBasePtr, get_region(), state,
                                         &m_currentVertexSolutionIndex,
                                         &m_currentCellCenterSolutionIndex, false);
 
@@ -1651,18 +1812,16 @@ namespace Iocgns {
     size_t                num_to_get = field.verify(data_size);
     cgsize_t              first      = 1;
 
-    char basename[CGNS_MAX_NAME_LENGTH + 1];
-
     // Create a lambda to eliminate lots of duplicate code in coordinate outputs...
     auto coord_lambda = [this, &data, &first, base](const char *ordinate) {
-      double *rdata = static_cast<double *>(data);
+      auto *rdata = static_cast<double *>(data);
 
       for (int zone = 1; zone < static_cast<int>(m_blockLocalNodeMap.size()); zone++) {
-        auto &              block_map = m_blockLocalNodeMap[zone];
+        auto               &block_map = m_blockLocalNodeMap[zone];
         cgsize_t            num_coord = block_map.size();
         std::vector<double> coord(num_coord);
-        CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, ordinate, CG_RealDouble, &first,
-                               &num_coord, coord.data()));
+        CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, ordinate, CGNS_ENUMV(RealDouble),
+                               &first, &num_coord, coord.data()));
 
         // Map to global coordinate position...
         for (cgsize_t i = 0; i < num_coord; i++) {
@@ -1687,12 +1846,13 @@ namespace Iocgns {
       }
 
       else if (field.get_name() == "mesh_model_coordinates") {
-        int cell_dimension = 0;
-        int phys_dimension = 0;
+        int  cell_dimension = 0;
+        int  phys_dimension = 0;
+        char basename[CGNS_MAX_NAME_LENGTH + 1];
         CGCHECKM(
             cg_base_read(get_file_pointer(), base, basename, &cell_dimension, &phys_dimension));
 
-        double *rdata = static_cast<double *>(data);
+        auto *rdata = static_cast<double *>(data);
 
         // Data required by upper classes store x0, y0, z0, ... xn,
         // yn, zn. Data stored in exodusII file is x0, ..., xn, y0,
@@ -1700,7 +1860,7 @@ namespace Iocgns {
         // memory to read in the data and then map into supplied
         // 'data'
         for (int zone = 1; zone < static_cast<int>(m_blockLocalNodeMap.size()); zone++) {
-          auto &              block_map = m_blockLocalNodeMap[zone];
+          auto               &block_map = m_blockLocalNodeMap[zone];
           cgsize_t            num_coord = block_map.size();
           std::vector<double> coord(num_coord);
 
@@ -1708,8 +1868,8 @@ namespace Iocgns {
           // Repetitive code for each coordinate direction; use a lambda to consolidate...
           auto blk_coord_lambda = [this, block_map, base, zone, &coord, first, num_coord,
                                    phys_dimension, &rdata](const char *ord_name, int ordinate) {
-            CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, ord_name, CG_RealDouble, &first,
-                                   &num_coord, coord.data()));
+            CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, ord_name, CGNS_ENUMV(RealDouble),
+                                   &first, &num_coord, coord.data()));
 
             // Map to global coordinate position...
             for (cgsize_t i = 0; i < num_coord; i++) {
@@ -1734,7 +1894,7 @@ namespace Iocgns {
         // Map the local ids in this node block
         // (1...node_count) to global node ids.
         if (field.get_type() == Ioss::Field::INT64) {
-          int64_t *idata = static_cast<int64_t *>(data);
+          auto *idata = static_cast<int64_t *>(data);
           std::iota(idata, idata + num_to_get, 1);
         }
         else {
@@ -1754,20 +1914,19 @@ namespace Iocgns {
 
       for (int zone = 1; zone < static_cast<int>(m_blockLocalNodeMap.size()); zone++) {
         int solution_index =
-            Utils::find_solution_index(get_file_pointer(), base, zone, step, CG_Vertex);
-        auto &   block_map      = m_blockLocalNodeMap[zone];
+            Utils::find_solution_index(get_file_pointer(), base, zone, step, CGNS_ENUMV(Vertex));
+        auto    &block_map      = m_blockLocalNodeMap[zone];
         cgsize_t num_block_node = block_map.size();
 
-        double *            rdata        = static_cast<double *>(data);
+        auto               *rdata        = static_cast<double *>(data);
         cgsize_t            range_min[1] = {1};
         cgsize_t            range_max[1] = {num_block_node};
-        auto                var_type     = field.transformed_storage();
-        int                 comp_count   = var_type->component_count();
+        int                 comp_count   = field.get_component_count(Ioss::Field::InOut::INPUT);
         std::vector<double> cgns_data(num_block_node);
         if (comp_count == 1) {
           CGCHECKM(cg_field_read(get_file_pointer(), base, zone, solution_index,
-                                 field.get_name().c_str(), CG_RealDouble, range_min, range_max,
-                                 cgns_data.data()));
+                                 field.get_name().c_str(), CGNS_ENUMV(RealDouble), range_min,
+                                 range_max, cgns_data.data()));
 
           // Map to global nodal field position...
           for (cgsize_t i = 0; i < num_block_node; i++) {
@@ -1775,13 +1934,11 @@ namespace Iocgns {
           }
         }
         else {
-          char field_suffix_separator = get_field_separator();
           for (int i = 0; i < comp_count; i++) {
-            std::string var_name =
-                var_type->label_name(field.get_name(), i + 1, field_suffix_separator);
+            std::string var_name = get_component_name(field, Ioss::Field::InOut::INPUT, i + 1);
 
             CGCHECKM(cg_field_read(get_file_pointer(), base, zone, solution_index, var_name.c_str(),
-                                   CG_RealDouble, range_min, range_max, cgns_data.data()));
+                                   CGNS_ENUMV(RealDouble), range_min, range_max, cgns_data.data()));
             for (cgsize_t j = 0; j < num_block_node; j++) {
               auto global                    = block_map[j];
               rdata[comp_count * global + i] = cgns_data[j];
@@ -1804,28 +1961,27 @@ namespace Iocgns {
     // Currently only TRANSIENT fields are input this way.  No valid reason, but that is the current
     // use case.
 
-    // Get the StructuredBlock that this NodeBlock is contained in:
-    const Ioss::GroupingEntity *sb         = nb->contained_in();
-    int                         base       = 1;
-    int                         zone       = Iocgns::Utils::get_db_zone(sb);
-    cgsize_t                    num_to_get = field.verify(data_size);
-
     // In this routine, if isParallel, then reading
     // file-per-processor; not parallel io from single file.
+    cgsize_t num_to_get = field.verify(data_size);
     if (isParallel && num_to_get == 0) {
       return 0;
     }
 
     Ioss::Field::RoleType role = field.get_role();
     if (role == Ioss::Field::TRANSIENT) {
+      // Get the StructuredBlock that this NodeBlock is contained in:
+
       // Locate the FlowSolution node corresponding to the correct state/step/time
       // TODO: do this at read_meta_data() and store...
-      int step = get_region()->get_current_state();
+      int                         step = get_region()->get_current_state();
+      int                         base = 1;
+      const Ioss::GroupingEntity *sb   = nb->contained_in();
+      int                         zone = Iocgns::Utils::get_db_zone(sb);
+      int                         solution_index =
+          Utils::find_solution_index(get_file_pointer(), base, zone, step, CGNS_ENUMV(Vertex));
 
-      int solution_index =
-          Utils::find_solution_index(get_file_pointer(), base, zone, step, CG_Vertex);
-
-      double *rdata = static_cast<double *>(data);
+      auto *rdata = static_cast<double *>(data);
       SMART_ASSERT(num_to_get == sb->get_property("node_count").get_int());
       cgsize_t rmin[3] = {0, 0, 0};
       cgsize_t rmax[3] = {0, 0, 0};
@@ -1842,22 +1998,20 @@ namespace Iocgns {
                      (rmax[0] - rmin[0] + 1) * (rmax[1] - rmin[1] + 1) * (rmax[2] - rmin[2] + 1));
       }
 
-      auto var_type               = field.transformed_storage();
-      int  comp_count             = var_type->component_count();
-      char field_suffix_separator = get_field_separator();
+      int comp_count = field.get_component_count(Ioss::Field::InOut::INPUT);
 
       if (comp_count == 1) {
         CGCHECKM(cg_field_read(get_file_pointer(), base, zone, solution_index,
-                               field.get_name().c_str(), CG_RealDouble, rmin, rmax, rdata));
+                               field.get_name().c_str(), CGNS_ENUMV(RealDouble), rmin, rmax,
+                               rdata));
       }
       else {
         std::vector<double> cgns_data(num_to_get);
         for (int i = 0; i < comp_count; i++) {
-          std::string var_name =
-              var_type->label_name(field.get_name(), i + 1, field_suffix_separator);
+          std::string var_name = get_component_name(field, Ioss::Field::InOut::INPUT, i + 1);
 
           CGCHECKM(cg_field_read(get_file_pointer(), base, zone, solution_index, var_name.c_str(),
-                                 CG_RealDouble, rmin, rmax, cgns_data.data()));
+                                 CGNS_ENUMV(RealDouble), rmin, rmax, cgns_data.data()));
           for (cgsize_t j = 0; j < num_to_get; j++) {
             rdata[comp_count * j + i] = cgns_data[j];
           }
@@ -1904,7 +2058,7 @@ namespace Iocgns {
           if (my_element_count > 0) {
             int field_byte_size = (field.get_type() == Ioss::Field::INT32) ? 32 : 64;
             if (field_byte_size == CG_SIZEOF_SIZE) {
-              cgsize_t *idata = reinterpret_cast<cgsize_t *>(data);
+              auto *idata = reinterpret_cast<cgsize_t *>(data);
               CGCHECKM(cg_elements_read(get_file_pointer(), base, zone, sect, idata, nullptr));
               Utils::map_cgns_connectivity(eb->topology(), num_to_get, idata);
             }
@@ -1913,7 +2067,7 @@ namespace Iocgns {
               CGCHECKM(
                   cg_elements_read(get_file_pointer(), base, zone, sect, connect.data(), nullptr));
               if (field.get_type() == Ioss::Field::INT32) {
-                auto * idata = reinterpret_cast<int *>(data);
+                auto  *idata = reinterpret_cast<int *>(data);
                 size_t i     = 0;
                 for (auto node : connect) {
                   idata[i++] = node;
@@ -1921,7 +2075,7 @@ namespace Iocgns {
                 Utils::map_cgns_connectivity(eb->topology(), num_to_get, idata);
               }
               else {
-                auto * idata = reinterpret_cast<int64_t *>(data);
+                auto  *idata = reinterpret_cast<int64_t *>(data);
                 size_t i     = 0;
                 for (auto node : connect) {
                   idata[i++] = node;
@@ -1943,7 +2097,7 @@ namespace Iocgns {
             }
           }
           else {
-            int64_t *idata = static_cast<int64_t *>(data);
+            auto *idata = static_cast<int64_t *>(data);
             for (size_t i = 0; i < element_nodes * num_to_get; i++) {
               idata[i] = block_map[idata[i] - 1] + 1;
             }
@@ -1954,25 +2108,25 @@ namespace Iocgns {
           // (eb_offset+1...eb_offset+1+my_element_count) to global element ids.
           size_t eb_offset_plus_one = eb->get_offset() + 1;
           if (field.get_type() == Ioss::Field::INT64) {
-            int64_t *idata = static_cast<int64_t *>(data);
-            std::iota(idata, idata + my_element_count, eb_offset_plus_one);
+            auto *idata = static_cast<int64_t *>(data);
+            std::iota(idata, idata + my_element_count, static_cast<int64_t>(eb_offset_plus_one));
           }
           else {
             SMART_ASSERT(field.get_type() == Ioss::Field::INT32);
             int *idata = static_cast<int *>(data);
-            std::iota(idata, idata + my_element_count, eb_offset_plus_one);
+            std::iota(idata, idata + my_element_count, static_cast<int>(eb_offset_plus_one));
           }
         }
         else if (field.get_name() == "implicit_ids") {
           size_t eb_offset_plus_one = eb->get_offset() + 1;
           if (field.get_type() == Ioss::Field::INT64) {
-            int64_t *idata = static_cast<int64_t *>(data);
-            std::iota(idata, idata + my_element_count, eb_offset_plus_one);
+            auto *idata = static_cast<int64_t *>(data);
+            std::iota(idata, idata + my_element_count, static_cast<int64_t>(eb_offset_plus_one));
           }
           else {
             SMART_ASSERT(field.get_type() == Ioss::Field::INT32);
             int *idata = static_cast<int *>(data);
-            std::iota(idata, idata + my_element_count, eb_offset_plus_one);
+            std::iota(idata, idata + my_element_count, static_cast<int>(eb_offset_plus_one));
           }
         }
         else {
@@ -1982,30 +2136,27 @@ namespace Iocgns {
       else if (role == Ioss::Field::TRANSIENT) {
         // Locate the FlowSolution node corresponding to the correct state/step/time
         // TODO: do this at read_meta_data() and store...
-        int step = get_region()->get_current_state();
-        int solution_index =
-            Utils::find_solution_index(get_file_pointer(), base, zone, step, CG_CellCenter);
+        int step           = get_region()->get_current_state();
+        int solution_index = Utils::find_solution_index(get_file_pointer(), base, zone, step,
+                                                        CGNS_ENUMV(CellCenter));
 
-        double * rdata        = static_cast<double *>(data);
+        auto    *rdata        = static_cast<double *>(data);
         cgsize_t range_min[1] = {1};
         cgsize_t range_max[1] = {my_element_count};
 
-        auto var_type   = field.transformed_storage();
-        int  comp_count = var_type->component_count();
+        int comp_count = field.get_component_count(Ioss::Field::InOut::INPUT);
         if (comp_count == 1) {
           CGCHECKM(cg_field_read(get_file_pointer(), base, zone, solution_index,
-                                 field.get_name().c_str(), CG_RealDouble, range_min, range_max,
-                                 rdata));
+                                 field.get_name().c_str(), CGNS_ENUMV(RealDouble), range_min,
+                                 range_max, rdata));
         }
         else {
           std::vector<double> cgns_data(my_element_count);
           for (int i = 0; i < comp_count; i++) {
-            char        field_suffix_separator = get_field_separator();
-            std::string var_name =
-                var_type->label_name(field.get_name(), i + 1, field_suffix_separator);
+            std::string var_name = get_component_name(field, Ioss::Field::InOut::INPUT, i + 1);
 
             CGCHECKM(cg_field_read(get_file_pointer(), base, zone, solution_index, var_name.c_str(),
-                                   CG_RealDouble, range_min, range_max, cgns_data.data()));
+                                   CGNS_ENUMV(RealDouble), range_min, range_max, cgns_data.data()));
             for (cgsize_t j = 0; j < my_element_count; j++) {
               rdata[comp_count * j + i] = cgns_data[j];
             }
@@ -2072,22 +2223,22 @@ namespace Iocgns {
     SMART_ASSERT(num_to_get ==
                  (rmax[0] - rmin[0] + 1) * (rmax[1] - rmin[1] + 1) * (rmax[2] - rmin[2] + 1));
 
-    double *rdata = static_cast<double *>(data);
+    auto *rdata = static_cast<double *>(data);
 
     if (role == Ioss::Field::MESH) {
       if (field.get_name() == "mesh_model_coordinates_x") {
-        CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, "CoordinateX", CG_RealDouble, rmin,
-                               rmax, rdata));
+        CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, "CoordinateX",
+                               CGNS_ENUMV(RealDouble), rmin, rmax, rdata));
       }
 
       else if (field.get_name() == "mesh_model_coordinates_y") {
-        CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, "CoordinateY", CG_RealDouble, rmin,
-                               rmax, rdata));
+        CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, "CoordinateY",
+                               CGNS_ENUMV(RealDouble), rmin, rmax, rdata));
       }
 
       else if (field.get_name() == "mesh_model_coordinates_z") {
-        CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, "CoordinateZ", CG_RealDouble, rmin,
-                               rmax, rdata));
+        CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, "CoordinateZ",
+                               CGNS_ENUMV(RealDouble), rmin, rmax, rdata));
       }
 
       else if (field.get_name() == "mesh_model_coordinates") {
@@ -2107,10 +2258,10 @@ namespace Iocgns {
 
         // ========================================================================
         // Repetitive code for each coordinate direction; use a lambda to consolidate...
-        auto coord_lambda = [this, base, zone, &coord, rmin, rmax, phys_dimension, num_to_get,
+        auto coord_lambda = [this, base, zone, &coord, &rmin, &rmax, phys_dimension, num_to_get,
                              &rdata](const char *ord_name, int ordinate) {
-          CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, ord_name, CG_RealDouble, rmin,
-                                 rmax, coord.data()));
+          CGCHECKM(cg_coord_read(get_file_pointer(), base, zone, ord_name, CGNS_ENUMV(RealDouble),
+                                 rmin, rmax, coord.data()));
 
           // Map to global coordinate position...
           for (cgsize_t i = 0; i < num_to_get; i++) {
@@ -2132,7 +2283,7 @@ namespace Iocgns {
       }
       else if (field.get_name() == "cell_node_ids") {
         if (field.get_type() == Ioss::Field::INT64) {
-          int64_t *idata = static_cast<int64_t *>(data);
+          auto *idata = static_cast<int64_t *>(data);
           sb->get_cell_node_ids(idata, true);
         }
         else {
@@ -2143,7 +2294,7 @@ namespace Iocgns {
       }
       else if (field.get_name() == "cell_ids") {
         if (field.get_type() == Ioss::Field::INT64) {
-          int64_t *idata = static_cast<int64_t *>(data);
+          auto *idata = static_cast<int64_t *>(data);
           sb->get_cell_ids(idata, true);
         }
         else {
@@ -2157,30 +2308,29 @@ namespace Iocgns {
       }
     }
     else if (role == Ioss::Field::TRANSIENT) {
-      auto var_type               = field.transformed_storage();
-      int  comp_count             = var_type->component_count();
-      char field_suffix_separator = get_field_separator();
+      int comp_count = field.get_component_count(Ioss::Field::InOut::INPUT);
 
       int sol_index = 0;
       int step      = get_region()->get_current_state();
       if (cell_field) {
-        sol_index = Utils::find_solution_index(get_file_pointer(), base, zone, step, CG_CellCenter);
+        sol_index = Utils::find_solution_index(get_file_pointer(), base, zone, step,
+                                               CGNS_ENUMV(CellCenter));
       }
       else {
-        sol_index = Utils::find_solution_index(get_file_pointer(), base, zone, step, CG_Vertex);
+        sol_index =
+            Utils::find_solution_index(get_file_pointer(), base, zone, step, CGNS_ENUMV(Vertex));
       }
 
       if (comp_count == 1) {
         CGCHECKM(cg_field_read(get_file_pointer(), base, zone, sol_index, field.get_name().c_str(),
-                               CG_RealDouble, rmin, rmax, rdata));
+                               CGNS_ENUMV(RealDouble), rmin, rmax, rdata));
       }
       else {
         std::vector<double> cgns_data(num_to_get);
         for (int i = 0; i < comp_count; i++) {
-          std::string var_name =
-              var_type->label_name(field.get_name(), i + 1, field_suffix_separator);
+          std::string var_name = get_component_name(field, Ioss::Field::InOut::INPUT, i + 1);
           CGCHECKM(cg_field_read(get_file_pointer(), base, zone, sol_index, var_name.c_str(),
-                                 CG_RealDouble, rmin, rmax, cgns_data.data()));
+                                 CGNS_ENUMV(RealDouble), rmin, rmax, cgns_data.data()));
           for (cgsize_t j = 0; j < num_to_get; j++) {
             rdata[comp_count * j + i] = cgns_data[j];
           }
@@ -2220,12 +2370,12 @@ namespace Iocgns {
     int zone = Iocgns::Utils::get_db_zone(sb);
     int sect = sb->get_property("section").get_int();
 
-    ssize_t num_to_get = field.verify(data_size);
+    int64_t num_to_get = field.verify(data_size);
     if (num_to_get > 0) {
       int64_t entity_count = sb->entity_count();
       if (num_to_get != entity_count) {
         std::ostringstream errmsg;
-        fmt::print("ERROR: Partial field input not yet implemented for side blocks");
+        fmt::print(errmsg, "ERROR: Partial field input not yet implemented for side blocks");
         IOSS_ERROR(errmsg);
       }
     }
@@ -2236,7 +2386,7 @@ namespace Iocgns {
 
         // TODO(gdsjaar): ? Possibly rewrite using cgi_read_int_data so can skip reading element
         // connectivity
-        int                   nodes_per_face = sb->topology()->number_nodes();
+        int           nodes_per_face = sb->topology()->number_nodes();
         CGNSIntVector elements(nodes_per_face * num_to_get); // Not needed, but can't skip
 
         // The parent information will be formatted as:
@@ -2262,17 +2412,17 @@ namespace Iocgns {
           }
 
           // Now, iterate the face connectivity vector and find a match in `m_boundaryFaces`
-          int *    i32data = reinterpret_cast<int *>(data);
-          int64_t *i64data = reinterpret_cast<int64_t *>(data);
+          int  *i32data = reinterpret_cast<int *>(data);
+          auto *i64data = reinterpret_cast<int64_t *>(data);
 
           size_t             offset           = 0;
           size_t             j                = 0;
           const std::string &name             = sb->parent_block()->name();
-          auto &             boundary         = m_boundaryFaces[name];
+          auto              &boundary         = m_boundaryFaces[name];
           int                num_corner_nodes = sb->topology()->number_corner_nodes();
           SMART_ASSERT(num_corner_nodes == 3 || num_corner_nodes == 4)(num_corner_nodes);
 
-          for (int iface = 0; iface < num_to_get; iface++) {
+          for (int64_t iface = 0; iface < num_to_get; iface++) {
             std::array<size_t, 4> conn = {{0, 0, 0, 0}};
 
             for (int i = 0; i < num_corner_nodes; i++) {
@@ -2313,9 +2463,9 @@ namespace Iocgns {
         else {
           size_t offset = m_zoneOffset[zone - 1];
           if (field.get_type() == Ioss::Field::INT32) {
-            int *  idata = reinterpret_cast<int *>(data);
+            int   *idata = reinterpret_cast<int *>(data);
             size_t j     = 0;
-            for (ssize_t i = 0; i < num_to_get; i++) {
+            for (int64_t i = 0; i < num_to_get; i++) {
               idata[j++] = parent[num_to_get * 0 + i] + offset; // Element
               idata[j++] = parent[num_to_get * 2 + i];
               SMART_ASSERT(parent[num_to_get * 1 + i] == 0);
@@ -2325,9 +2475,9 @@ namespace Iocgns {
             Utils::map_cgns_face_to_ioss(sb->parent_element_topology(), num_to_get, idata);
           }
           else {
-            int64_t *idata = reinterpret_cast<int64_t *>(data);
-            size_t   j     = 0;
-            for (ssize_t i = 0; i < num_to_get; i++) {
+            auto  *idata = reinterpret_cast<int64_t *>(data);
+            size_t j     = 0;
+            for (int64_t i = 0; i < num_to_get; i++) {
               idata[j++] = parent[num_to_get * 0 + i] + offset; // Element
               idata[j++] = parent[num_to_get * 2 + i];
               SMART_ASSERT(parent[num_to_get * 1 + i] == 0);
@@ -2387,25 +2537,25 @@ namespace Iocgns {
         SMART_ASSERT(num_to_get == sb->get_property("cell_count").get_int());
       }
 
-      double *rdata = static_cast<double *>(data);
+      auto *rdata = static_cast<double *>(data);
 
       int crd_idx = 0;
       if (field.get_name() == "mesh_model_coordinates_x") {
         SMART_ASSERT(!cell_field);
-        CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CG_RealDouble, "CoordinateX", rdata,
-                                &crd_idx));
+        CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CGNS_ENUMV(RealDouble),
+                                "CoordinateX", rdata, &crd_idx));
       }
 
       else if (field.get_name() == "mesh_model_coordinates_y") {
         SMART_ASSERT(!cell_field);
-        CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CG_RealDouble, "CoordinateY", rdata,
-                                &crd_idx));
+        CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CGNS_ENUMV(RealDouble),
+                                "CoordinateY", rdata, &crd_idx));
       }
 
       else if (field.get_name() == "mesh_model_coordinates_z") {
         SMART_ASSERT(!cell_field);
-        CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CG_RealDouble, "CoordinateZ", rdata,
-                                &crd_idx));
+        CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CGNS_ENUMV(RealDouble),
+                                "CoordinateZ", rdata, &crd_idx));
       }
 
       else if (field.get_name() == "mesh_model_coordinates") {
@@ -2430,7 +2580,7 @@ namespace Iocgns {
             coord[i] = rdata[phys_dimension * i + ordinate];
           }
 
-          CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CG_RealDouble, ord_name,
+          CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CGNS_ENUMV(RealDouble), ord_name,
                                   coord.data(), &crd_index));
         };
         // End of lambda...
@@ -2450,15 +2600,14 @@ namespace Iocgns {
       }
     }
     else if (role == Ioss::Field::TRANSIENT) {
-      double *rdata                  = static_cast<double *>(data);
-      int     cgns_field             = 0;
-      auto    var_type               = field.transformed_storage();
-      int     comp_count             = var_type->component_count();
-      char    field_suffix_separator = get_field_separator();
+      auto *rdata      = static_cast<double *>(data);
+      int   cgns_field = 0;
+      int   comp_count = field.get_component_count(Ioss::Field::InOut::OUTPUT);
       if (comp_count == 1) {
         CGCHECKM(cg_field_write(get_file_pointer(), base, zone, m_currentCellCenterSolutionIndex,
-                                CG_RealDouble, field.get_name().c_str(), rdata, &cgns_field));
-        Utils::set_field_index(field, cgns_field, CG_CellCenter);
+                                CGNS_ENUMV(RealDouble), field.get_name().c_str(), rdata,
+                                &cgns_field));
+        Utils::set_field_index(field, cgns_field, CGNS_ENUMV(CellCenter));
       }
       else {
         std::vector<double> cgns_data(num_to_get);
@@ -2466,13 +2615,13 @@ namespace Iocgns {
           for (cgsize_t j = 0; j < num_to_get; j++) {
             cgns_data[j] = rdata[comp_count * j + i];
           }
-          std::string var_name =
-              var_type->label_name(field.get_name(), i + 1, field_suffix_separator);
+          std::string var_name = get_component_name(field, Ioss::Field::InOut::OUTPUT, i + 1);
 
           CGCHECKM(cg_field_write(get_file_pointer(), base, zone, m_currentCellCenterSolutionIndex,
-                                  CG_RealDouble, var_name.c_str(), cgns_data.data(), &cgns_field));
+                                  CGNS_ENUMV(RealDouble), var_name.c_str(), cgns_data.data(),
+                                  &cgns_field));
           if (i == 0) {
-            Utils::set_field_index(field, cgns_field, CG_CellCenter);
+            Utils::set_field_index(field, cgns_field, CGNS_ENUMV(CellCenter));
           }
         }
       }
@@ -2532,13 +2681,21 @@ namespace Iocgns {
           size[0]          = nodes.size() - 1;
 
           CGCHECKM(cg_zone_write(get_file_pointer(), base, eb->name().c_str(), size,
-                                 CG_Unstructured, &zone));
+                                 CGNS_ENUMV(Unstructured), &zone));
           eb->property_update("db_zone", zone);
           eb->property_update("zone", zone);
           eb->property_update("id", zone);
           eb->property_update("guid", zone);
           eb->property_update("section", 1);
           eb->property_update("base", base);
+          eb->property_update("zone_node_count", size[0]);
+          eb->property_update("zone_element_count", size[1]);
+
+          if (eb->property_exists("assembly")) {
+            std::string assembly = eb->get_property("assembly").get_string();
+            CGCHECKM(cg_goto(get_file_pointer(), base, "Zone_t", zone, "end"));
+            CGCHECKM(cg_famname_write(assembly.c_str()));
+          }
 
           // Now we have a valid zone so can update some data structures...
           m_zoneOffset[zone]                = m_zoneOffset[zone - 1] + size[1];
@@ -2551,9 +2708,9 @@ namespace Iocgns {
           block_map->reverse_map_data(data, field, num_to_get * element_nodes);
 
           if (eb->entity_count() > 0) {
-            CG_ElementType_t type            = Utils::map_topology_to_cgns(eb->topology()->name());
-            int              sect            = 0;
-            int              field_byte_size = (field.get_type() == Ioss::Field::INT32) ? 32 : 64;
+            CGNS_ENUMT(ElementType_t) type = Utils::map_topology_to_cgns(eb->topology()->name());
+            int sect                       = 0;
+            int field_byte_size            = (field.get_type() == Ioss::Field::INT32) ? 32 : 64;
             if (field_byte_size == CG_SIZEOF_SIZE) {
               Utils::unmap_cgns_connectivity(eb->topology(), num_to_get, (cgsize_t *)data);
               CGCHECKM(cg_section_write(get_file_pointer(), base, zone, "HexElements", type, 1,
@@ -2587,17 +2744,16 @@ namespace Iocgns {
         }
       }
       else if (role == Ioss::Field::TRANSIENT) {
-        int     base                   = eb->get_property("base").get_int();
-        int     zone                   = Iocgns::Utils::get_db_zone(eb);
-        double *rdata                  = static_cast<double *>(data);
-        int     cgns_field             = 0;
-        auto    var_type               = field.transformed_storage();
-        int     comp_count             = var_type->component_count();
-        char    field_suffix_separator = get_field_separator();
+        int   base       = eb->get_property("base").get_int();
+        int   zone       = Iocgns::Utils::get_db_zone(eb);
+        auto *rdata      = static_cast<double *>(data);
+        int   cgns_field = 0;
+        int   comp_count = field.get_component_count(Ioss::Field::InOut::OUTPUT);
         if (comp_count == 1) {
           CGCHECKM(cg_field_write(get_file_pointer(), base, zone, m_currentCellCenterSolutionIndex,
-                                  CG_RealDouble, field.get_name().c_str(), rdata, &cgns_field));
-          Utils::set_field_index(field, cgns_field, CG_CellCenter);
+                                  CGNS_ENUMV(RealDouble), field.get_name().c_str(), rdata,
+                                  &cgns_field));
+          Utils::set_field_index(field, cgns_field, CGNS_ENUMV(CellCenter));
         }
         else {
           std::vector<double> cgns_data(num_to_get);
@@ -2605,14 +2761,13 @@ namespace Iocgns {
             for (size_t j = 0; j < num_to_get; j++) {
               cgns_data[j] = rdata[comp_count * j + i];
             }
-            std::string var_name =
-                var_type->label_name(field.get_name(), i + 1, field_suffix_separator);
+            std::string var_name = get_component_name(field, Ioss::Field::InOut::OUTPUT, i + 1);
 
             CGCHECKM(cg_field_write(get_file_pointer(), base, zone,
-                                    m_currentCellCenterSolutionIndex, CG_RealDouble,
+                                    m_currentCellCenterSolutionIndex, CGNS_ENUMV(RealDouble),
                                     var_name.c_str(), cgns_data.data(), &cgns_field));
             if (i == 0) {
-              Utils::set_field_index(field, cgns_field, CG_CellCenter);
+              Utils::set_field_index(field, cgns_field, CGNS_ENUMV(CellCenter));
             }
           }
         }
@@ -2686,14 +2841,14 @@ namespace Iocgns {
                field.get_name() == "mesh_model_coordinates_z") {
 
         // 'rdata' is of size number-nodes-on-this-rank
-        double *rdata = static_cast<double *>(data);
+        auto *rdata = static_cast<double *>(data);
 
         if (field.get_name() == "mesh_model_coordinates") {
           int spatial_dim = nb->get_property("component_degree").get_int();
           for (const auto &block : m_globalToBlockLocalNodeMap) {
             auto zone = block.first;
             // NOTE: 'block_map' is 1-based indexing
-            const auto &        block_map = block.second;
+            const auto         &block_map = block.second;
             std::vector<double> x(block_map->size());
             std::vector<double> y(block_map->size());
             std::vector<double> z(block_map->size());
@@ -2713,17 +2868,17 @@ namespace Iocgns {
             // Create the zone
             // Output this zones coordinates...
             int crd_idx = 0;
-            CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CG_RealDouble, "CoordinateX",
-                                    x.data(), &crd_idx));
+            CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CGNS_ENUMV(RealDouble),
+                                    "CoordinateX", x.data(), &crd_idx));
 
             if (spatial_dim > 1) {
-              CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CG_RealDouble, "CoordinateY",
-                                      y.data(), &crd_idx));
+              CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CGNS_ENUMV(RealDouble),
+                                      "CoordinateY", y.data(), &crd_idx));
             }
 
             if (spatial_dim > 2) {
-              CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CG_RealDouble, "CoordinateZ",
-                                      z.data(), &crd_idx));
+              CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CGNS_ENUMV(RealDouble),
+                                      "CoordinateZ", z.data(), &crd_idx));
             }
           }
         }
@@ -2732,7 +2887,7 @@ namespace Iocgns {
           for (const auto &block : m_globalToBlockLocalNodeMap) {
             auto zone = block.first;
             // NOTE: 'block_map' is 1-based indexing
-            const auto &        block_map = block.second;
+            const auto         &block_map = block.second;
             std::vector<double> xyz(block_map->size());
 
             for (size_t i = 0; i < block_map->size(); i++) {
@@ -2754,7 +2909,7 @@ namespace Iocgns {
             // Create the zone
             // Output this zones coordinates...
             int crd_idx = 0;
-            CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CG_RealDouble,
+            CGCHECKM(cg_coord_write(get_file_pointer(), base, zone, CGNS_ENUMV(RealDouble),
                                     cgns_name.c_str(), xyz.data(), &crd_idx));
           }
         }
@@ -2764,19 +2919,18 @@ namespace Iocgns {
       }
     }
     else if (role == Ioss::Field::TRANSIENT) {
-      double *rdata      = static_cast<double *>(data);
-      int     cgns_field = 0;
+      auto *rdata      = static_cast<double *>(data);
+      int   cgns_field = 0;
 
       for (const auto &block : m_globalToBlockLocalNodeMap) {
         auto zone = block.first;
         // NOTE: 'block_map' has one more entry than node_count.
         // First entry is for something else.  'block_map' is
         // 1-based.
-        const auto &        block_map = block.second;
+        const auto         &block_map = block.second;
         std::vector<double> blk_data(block_map->size());
 
-        auto var_type   = field.transformed_storage();
-        int  comp_count = var_type->component_count();
+        int comp_count = field.get_component_count(Ioss::Field::InOut::OUTPUT);
 
         if (comp_count == 1) {
           for (size_t j = 0; j < block_map->size(); j++) {
@@ -2784,24 +2938,22 @@ namespace Iocgns {
             blk_data[j] = rdata[idx];
           }
           CGCHECKM(cg_field_write(get_file_pointer(), base, zone, m_currentVertexSolutionIndex,
-                                  CG_RealDouble, field.get_name().c_str(), blk_data.data(),
+                                  CGNS_ENUMV(RealDouble), field.get_name().c_str(), blk_data.data(),
                                   &cgns_field));
-          Utils::set_field_index(field, cgns_field, CG_Vertex);
+          Utils::set_field_index(field, cgns_field, CGNS_ENUMV(Vertex));
         }
         else {
-          char field_suffix_separator = get_field_separator();
-
           for (int i = 0; i < comp_count; i++) {
             for (size_t j = 0; j < block_map->size(); j++) {
               auto idx    = global_to_zone_local_idx(j, block_map, nodeMap, isParallel);
               blk_data[j] = rdata[comp_count * idx + i];
             }
-            std::string var_name =
-                var_type->label_name(field.get_name(), i + 1, field_suffix_separator);
+            std::string var_name = get_component_name(field, Ioss::Field::InOut::OUTPUT, i + 1);
             CGCHECKM(cg_field_write(get_file_pointer(), base, zone, m_currentVertexSolutionIndex,
-                                    CG_RealDouble, var_name.c_str(), blk_data.data(), &cgns_field));
+                                    CGNS_ENUMV(RealDouble), var_name.c_str(), blk_data.data(),
+                                    &cgns_field));
             if (i == 0) {
-              Utils::set_field_index(field, cgns_field, CG_Vertex);
+              Utils::set_field_index(field, cgns_field, CGNS_ENUMV(Vertex));
             }
           }
         }
@@ -2834,17 +2986,16 @@ namespace Iocgns {
 
     Ioss::Field::RoleType role = field.get_role();
     if (role == Ioss::Field::TRANSIENT) {
-      int     base                   = 1;
-      double *rdata                  = static_cast<double *>(data);
-      int     cgns_field             = 0;
-      auto    var_type               = field.transformed_storage();
-      int     comp_count             = var_type->component_count();
-      char    field_suffix_separator = get_field_separator();
+      int   base       = 1;
+      auto *rdata      = static_cast<double *>(data);
+      int   cgns_field = 0;
+      int   comp_count = field.get_component_count(Ioss::Field::InOut::OUTPUT);
 
       if (comp_count == 1) {
         CGCHECKM(cg_field_write(get_file_pointer(), base, zone, m_currentVertexSolutionIndex,
-                                CG_RealDouble, field.get_name().c_str(), rdata, &cgns_field));
-        Utils::set_field_index(field, cgns_field, CG_Vertex);
+                                CGNS_ENUMV(RealDouble), field.get_name().c_str(), rdata,
+                                &cgns_field));
+        Utils::set_field_index(field, cgns_field, CGNS_ENUMV(Vertex));
       }
       else {
         std::vector<double> cgns_data(num_to_get);
@@ -2852,13 +3003,13 @@ namespace Iocgns {
           for (cgsize_t j = 0; j < num_to_get; j++) {
             cgns_data[j] = rdata[comp_count * j + i];
           }
-          std::string var_name =
-              var_type->label_name(field.get_name(), i + 1, field_suffix_separator);
+          std::string var_name = get_component_name(field, Ioss::Field::InOut::OUTPUT, i + 1);
 
           CGCHECKM(cg_field_write(get_file_pointer(), base, zone, m_currentVertexSolutionIndex,
-                                  CG_RealDouble, var_name.c_str(), cgns_data.data(), &cgns_field));
+                                  CGNS_ENUMV(RealDouble), var_name.c_str(), cgns_data.data(),
+                                  &cgns_field));
           if (i == 0) {
-            Utils::set_field_index(field, cgns_field, CG_Vertex);
+            Utils::set_field_index(field, cgns_field, CGNS_ENUMV(Vertex));
           }
         }
       }
@@ -2900,9 +3051,9 @@ namespace Iocgns {
       IOSS_ERROR(errmsg);
     }
 
-    int     base       = parent_block->get_property("base").get_int();
-    int     zone       = Iocgns::Utils::get_db_zone(parent_block);
-    ssize_t num_to_get = field.verify(data_size);
+    int  base       = parent_block->get_property("base").get_int();
+    int  zone       = Iocgns::Utils::get_db_zone(parent_block);
+    auto num_to_get = field.verify(data_size);
 
     if (num_to_get == 0) {
       return num_to_get;
@@ -2914,8 +3065,8 @@ namespace Iocgns {
       // Handle the MESH fields required for a CGNS file model.
       // (The 'genesis' portion)
       if (field.get_name() == "element_side") {
-        CG_ElementType_t type = Utils::map_topology_to_cgns(sb->topology()->name());
-        int              sect = 0;
+        CGNS_ENUMT(ElementType_t) type = Utils::map_topology_to_cgns(sb->topology()->name());
+        int sect                       = 0;
 
         cgsize_t cg_start = m_bcOffset[zone] + 1;
         cgsize_t cg_end   = m_bcOffset[zone] + num_to_get;
@@ -2928,29 +3079,31 @@ namespace Iocgns {
         //       of the nodes instead of the element/side info.
         // Get name from parent sideset...  This is name of the ZoneBC entry
         auto &name = sb->owner()->name();
-	// This is the name of the BC_t node 
-	auto sb_name = Iocgns::Utils::decompose_sb_name(sb->name());
+        // This is the name of the BC_t node
+        auto sb_name = Iocgns::Utils::decompose_sb_name(sb->name());
 
         CGNSIntVector point_range{cg_start, cg_end};
-        CGCHECKM(cg_boco_write(get_file_pointer(), base, zone, name.c_str(), CG_FamilySpecified,
-                               CG_PointRange, 2, point_range.data(), &sect));
+        CGCHECKM(cg_boco_write(get_file_pointer(), base, zone, name.c_str(),
+                               CGNS_ENUMV(FamilySpecified), CGNS_ENUMV(PointRange), 2,
+                               point_range.data(), &sect));
         CGCHECKM(
             cg_goto(get_file_pointer(), base, "Zone_t", zone, "ZoneBC_t", 1, "BC_t", sect, "end"));
         CGCHECKM(cg_famname_write(name.c_str()));
-        CGCHECKM(cg_boco_gridlocation_write(get_file_pointer(), base, zone, sect, CG_FaceCenter));
+        CGCHECKM(cg_boco_gridlocation_write(get_file_pointer(), base, zone, sect,
+                                            CGNS_ENUMV(FaceCenter)));
 
         CGCHECKM(cg_section_partial_write(get_file_pointer(), base, zone, sb_name.c_str(), type,
                                           cg_start, cg_end, 0, &sect));
 
         sb->property_update("section", sect);
 
-        size_t                offset = m_zoneOffset[zone - 1];
+        size_t        offset = m_zoneOffset[zone - 1];
         CGNSIntVector parent(4 * num_to_get);
 
         if (field.get_type() == Ioss::Field::INT32) {
-          int *  idata = reinterpret_cast<int *>(data);
+          int   *idata = reinterpret_cast<int *>(data);
           size_t j     = 0;
-          for (ssize_t i = 0; i < num_to_get; i++) {
+          for (size_t i = 0; i < num_to_get; i++) {
             cgsize_t element           = elemMap.global_to_local(idata[j++]) - offset;
             parent[num_to_get * 0 + i] = element;
             parent[num_to_get * 2 + i] = idata[j++]; // side
@@ -2959,9 +3112,9 @@ namespace Iocgns {
           Utils::map_ioss_face_to_cgns(sb->parent_element_topology(), num_to_get, parent);
         }
         else {
-          int64_t *idata = reinterpret_cast<int64_t *>(data);
-          size_t   j     = 0;
-          for (ssize_t i = 0; i < num_to_get; i++) {
+          auto  *idata = reinterpret_cast<int64_t *>(data);
+          size_t j     = 0;
+          for (size_t i = 0; i < num_to_get; i++) {
             cgsize_t element           = elemMap.global_to_local(idata[j++]) - offset;
             parent[num_to_get * 0 + i] = element; // Element
             parent[num_to_get * 2 + i] = idata[j++];
@@ -2976,9 +3129,8 @@ namespace Iocgns {
       else if (field.get_name() == "distribution_factors") {
         static bool warning_output = false;
         if (!warning_output) {
-          fmt::print(
-              stderr,
-              "IOSS: WARNING: For CGNS output, the sideset distribution factors are not output.\n");
+          fmt::print(Ioss::WARNING(),
+                     "For CGNS output, the sideset distribution factors are not output.\n");
           warning_output = true;
         }
         return 0;

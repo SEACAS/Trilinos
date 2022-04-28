@@ -47,7 +47,6 @@
 
 #include "Tpetra_Directory.hpp" // must include for implicit instantiation to work
 #include "Tpetra_Details_Behavior.hpp"
-#include "Tpetra_Details_checkPointer.hpp"
 #include "Tpetra_Details_FixedHashTable.hpp"
 #include "Tpetra_Details_gathervPrint.hpp"
 #include "Tpetra_Details_printOnce.hpp"
@@ -78,7 +77,6 @@ namespace { // (anonymous)
 
     const bool debug = Behavior::debug("Map");
     if (debug) {
-      using Tpetra::Details::pointerAccessibleFromExecutionSpace;
       using Teuchos::outArg;
       using Teuchos::REDUCE_MIN;
       using Teuchos::reduceAll;
@@ -94,22 +92,6 @@ namespace { // (anonymous)
         if (verbose) {
           lclErrStrm << "Proc " << myRank << ": indexList is null, "
             "but indexListSize=" << indexListSize << " != 0." << endl;
-        }
-      }
-      else {
-        if (indexListSize != 0 && indexList != nullptr &&
-            ! pointerAccessibleFromExecutionSpace (indexList, execSpace)) {
-          lclSuccess = 0;
-          if (verbose) {
-            using ::Tpetra::Details::memorySpaceName;
-            const std::string memSpaceName = memorySpaceName (indexList);
-            const std::string execSpaceName =
-              Teuchos::TypeNameTraits<ExecutionSpace>::name ();
-            lclErrStrm << "Proc " << myRank << ": Input array is not "
-              "accessible from the required execution space " <<
-              execSpaceName << ".  As far as I can tell, array lives "
-              "in memory space " << memSpaceName << "." << endl;
-          }
         }
       }
       int gblSuccess = 0; // output argument
@@ -719,10 +701,12 @@ namespace Tpetra {
                          nonContigGids_host.size ());
         Kokkos::deep_copy (nonContigGids, nonContigGids_host);
 
-        glMap_ = global_to_local_table_type (nonContigGids,
-                                             firstContiguousGID_,
-                                             lastContiguousGID_,
-                                             static_cast<LO> (i));
+        glMap_ = global_to_local_table_type(nonContigGids,
+                                            firstContiguousGID_,
+                                            lastContiguousGID_,
+                                            static_cast<LO> (i));
+        // Make host version - when memory spaces match these just do trivial assignment
+        glMapHost_ = global_to_local_table_host_type(glMap_);
       }
 
       // FIXME (mfh 10 Oct 2016) When we construct the global-to-local
@@ -1101,10 +1085,12 @@ namespace Tpetra {
            << entryList.extent (0) << " - " << i
            << ".  Please report this bug to the Tpetra developers.");
 
-        glMap_ = global_to_local_table_type (nonContigGids,
-                                             firstContiguousGID_,
-                                             lastContiguousGID_,
-                                             static_cast<LO> (i));
+        glMap_ = global_to_local_table_type(nonContigGids,
+                                            firstContiguousGID_,
+                                            lastContiguousGID_,
+                                            static_cast<LO> (i));
+        // Make host version - when memory spaces match these just do trivial assignment
+        glMapHost_ = global_to_local_table_host_type(glMap_);
       }
 
       // FIXME (mfh 10 Oct 2016) When we construct the global-to-local
@@ -1297,7 +1283,8 @@ namespace Tpetra {
     else {
       // If the given global index is not in the table, this returns
       // the same value as OrdinalTraits<LocalOrdinal>::invalid().
-      return glMap_.get (globalIndex);
+      // glMapHost_ is Host and does not assume UVM
+      return glMapHost_.get (globalIndex);
     }
   }
 
@@ -1360,7 +1347,7 @@ namespace Tpetra {
     return local_map_type (glMap_, lgMap_, getIndexBase (),
                            getMinGlobalIndex (), getMaxGlobalIndex (),
                            firstContiguousGID_, lastContiguousGID_,
-                           getNodeNumElements (), isContiguous ());
+                           getLocalNumElements (), isContiguous ());
   }
 
   template <class LocalOrdinal, class GlobalOrdinal, class Node>
@@ -1422,7 +1409,7 @@ namespace Tpetra {
 
     // Do both Maps have the same number of indices on each process?
     const int locallyCompat =
-      (getNodeNumElements () == map.getNodeNumElements ()) ? 1 : 0;
+      (getLocalNumElements () == map.getLocalNumElements ()) ? 1 : 0;
 
     int globallyCompat = 0;
     reduceAll<int, int> (*comm_, REDUCE_MIN, locallyCompat, outArg (globallyCompat));
@@ -1441,7 +1428,7 @@ namespace Tpetra {
     // If both Maps are contiguous, we can compare their GID ranges
     // easily by looking at the min and max GID on this process.
     // Otherwise, we'll compare their GID lists.  If only one Map is
-    // contiguous, then we only have to call getNodeElementList() on
+    // contiguous, then we only have to call getLocalElementList() on
     // the noncontiguous Map.  (It's best to avoid calling it on a
     // contiguous Map, since it results in unnecessary storage that
     // persists for the lifetime of the Map.)
@@ -1451,7 +1438,7 @@ namespace Tpetra {
       // equality on all processes, since Map is immutable.
       return true;
     }
-    else if (getNodeNumElements () != map.getNodeNumElements ()) {
+    else if (getLocalNumElements () != map.getLocalNumElements ()) {
       return false;
     }
     else if (getMinGlobalIndex () != map.getMinGlobalIndex () ||
@@ -1467,7 +1454,7 @@ namespace Tpetra {
           TEUCHOS_TEST_FOR_EXCEPTION(
             ! this->isContiguous () || map.isContiguous (), std::logic_error,
             "Tpetra::Map::locallySameAs: BUG");
-          ArrayView<const GO> rhsElts = map.getNodeElementList ();
+          ArrayView<const GO> rhsElts = map.getLocalElementList ();
           const GO minLhsGid = this->getMinGlobalIndex ();
           const size_type numRhsElts = rhsElts.size ();
           for (size_type k = 0; k < numRhsElts; ++k) {
@@ -1483,7 +1470,7 @@ namespace Tpetra {
         TEUCHOS_TEST_FOR_EXCEPTION(
           this->isContiguous () || ! map.isContiguous (), std::logic_error,
           "Tpetra::Map::locallySameAs: BUG");
-        ArrayView<const GO> lhsElts = this->getNodeElementList ();
+        ArrayView<const GO> lhsElts = this->getLocalElementList ();
         const GO minRhsGid = map.getMinGlobalIndex ();
         const size_type numLhsElts = lhsElts.size ();
         for (size_type k = 0; k < numLhsElts; ++k) {
@@ -1497,15 +1484,15 @@ namespace Tpetra {
       else if (this->lgMap_.data () == map.lgMap_.data ()) {
         // Pointers to LID->GID "map" (actually just an array) are the
         // same, and the number of GIDs are the same.
-        return this->getNodeNumElements () == map.getNodeNumElements ();
+        return this->getLocalNumElements () == map.getLocalNumElements ();
       }
       else { // we actually have to compare the GIDs
-        if (this->getNodeNumElements () != map.getNodeNumElements ()) {
+        if (this->getLocalNumElements () != map.getLocalNumElements ()) {
           return false; // We already checked above, but check just in case
         }
         else {
-          ArrayView<const GO> lhsElts =     getNodeElementList ();
-          ArrayView<const GO> rhsElts = map.getNodeElementList ();
+          ArrayView<const GO> lhsElts =     getLocalElementList ();
+          ArrayView<const GO> rhsElts = map.getLocalElementList ();
 
           // std::equal requires that the latter range is as large as
           // the former.  We know the ranges have equal length, because
@@ -1528,8 +1515,8 @@ namespace Tpetra {
     auto lmap1 = map.getLocalMap();
     auto lmap2 = this->getLocalMap();
 
-    auto numLocalElements1 = lmap1.getNodeNumElements();
-    auto numLocalElements2 = lmap2.getNodeNumElements();
+    auto numLocalElements1 = lmap1.getLocalNumElements();
+    auto numLocalElements2 = lmap2.getLocalNumElements();
 
     if (numLocalElements1 > numLocalElements2) {
       // There are more indices in the first map on this process than in second map.
@@ -1645,7 +1632,6 @@ namespace Tpetra {
         Kokkos::RangePolicy<LO, typename DT::execution_space>
           range (static_cast<LO> (0), static_cast<LO> (lgMap.size ()));
         Kokkos::parallel_for (range, *this);
-        Kokkos::fence();
       }
 
       KOKKOS_INLINE_FUNCTION void operator () (const LO& lid) const {
@@ -1667,7 +1653,6 @@ namespace Tpetra {
     using std::endl;
     using LO = local_ordinal_type;
     using GO = global_ordinal_type;
-    using DT = device_type;
     using const_lg_view_type = decltype(lgMap_);
     using lg_view_type = typename const_lg_view_type::non_const_type;
     const bool debug = Details::Behavior::debug("Map");
@@ -1704,7 +1689,7 @@ namespace Tpetra {
            "noncontiguous Map.  Please report this bug to the Tpetra "
            "developers.");
       }
-      const LO numElts = static_cast<LO> (getNodeNumElements ());
+      const LO numElts = static_cast<LO> (getLocalNumElements ());
 
       using Kokkos::view_alloc;
       using Kokkos::WithoutInitializing;
@@ -1714,13 +1699,14 @@ namespace Tpetra {
         os << *prefix << "Fill lgMap" << endl;
         std::cerr << os.str();
       }
-      FillLgMap<LO, GO, DT> fillIt (lgMap, minMyGID_);
+      FillLgMap<LO, GO, no_uvm_device_type> fillIt (lgMap, minMyGID_);
 
       if (verbose) {
         std::ostringstream os;
         os << *prefix << "Copy lgMap to lgMapHost" << endl;
         std::cerr << os.str();
       }
+
       auto lgMapHost =
         Kokkos::create_mirror_view (Kokkos::HostSpace (), lgMap);
       Kokkos::deep_copy (lgMapHost, lgMap);
@@ -1735,12 +1721,22 @@ namespace Tpetra {
       os << *prefix << "Done" << endl;
       std::cerr << os.str();
     }
-    return lgMap_;
+    return lgMapHost_;
   }
+
+#ifdef TPETRA_ENABLE_DEPRECATED_CODE
+  template <class LocalOrdinal, class GlobalOrdinal, class Node>
+  TPETRA_DEPRECATED
+  Teuchos::ArrayView<const GlobalOrdinal>
+  Map<LocalOrdinal,GlobalOrdinal,Node>::getNodeElementList () const
+  {
+    return this->getLocalElementList();
+  }
+#endif
 
   template <class LocalOrdinal, class GlobalOrdinal, class Node>
   Teuchos::ArrayView<const GlobalOrdinal>
-  Map<LocalOrdinal,GlobalOrdinal,Node>::getNodeElementList () const
+  Map<LocalOrdinal,GlobalOrdinal,Node>::getLocalElementList () const
   {
     using GO = global_ordinal_type;
 
@@ -1813,7 +1809,7 @@ namespace Tpetra {
     out << "Process " << myRank << " of " << numProcs << ":" << endl;
     Teuchos::OSTab tab1 (out);
 
-    const LO numEnt = static_cast<LO> (this->getNodeNumElements ());
+    const LO numEnt = static_cast<LO> (this->getLocalNumElements ());
     out << "My number of entries: " << numEnt << endl
         << "My minimum global index: " << this->getMinGlobalIndex () << endl
         << "My maximum global index: " << this->getMaxGlobalIndex () << endl;
@@ -1961,6 +1957,7 @@ namespace Tpetra {
       newMap->lgMap_ = this->lgMap_;
       newMap->lgMapHost_ = this->lgMapHost_;
       newMap->glMap_ = this->glMap_;
+      newMap->glMapHost_ = this->glMapHost_;
       // It's OK not to initialize the new Map's Directory.
       // This is initialized lazily, on first call to getRemoteIndexList.
 
@@ -2001,23 +1998,25 @@ namespace Tpetra {
       using size_type =
         typename std::decay<decltype (lgMap.extent (0)) >::type;
       const size_type lclNumInds =
-        static_cast<size_type> (this->getNodeNumElements ());
+        static_cast<size_type> (this->getLocalNumElements ());
       using Teuchos::TypeNameTraits;
       TEUCHOS_TEST_FOR_EXCEPTION
         (lgMap.extent (0) != lclNumInds, std::logic_error,
          "Tpetra::Map::replaceCommWithSubset: Result of getMyGlobalIndices() "
          "has length " << lgMap.extent (0) << " (of type " <<
-         TypeNameTraits<size_type>::name () << ") != this->getNodeNumElements()"
-         " = " << this->getNodeNumElements () << ".  The latter, upon being "
+         TypeNameTraits<size_type>::name () << ") != this->getLocalNumElements()"
+         " = " << this->getLocalNumElements () << ".  The latter, upon being "
          "cast to size_type = " << TypeNameTraits<size_type>::name () << ", "
          "becomes " << lclNumInds << ".  Please report this bug to the Tpetra "
          "developers.");
 #else
-      Teuchos::ArrayView<const GO> lgMap = this->getNodeElementList ();
+      Teuchos::ArrayView<const GO> lgMap = this->getLocalElementList ();
 #endif // 1
 
       const GO indexBase = this->getIndexBase ();
-      return rcp (new map_type (RECOMPUTE, lgMap, indexBase, newComm));
+      // map stores HostSpace of CudaSpace but constructor is still CudaUVMSpace
+      auto lgMap_device = Kokkos::create_mirror_view_and_copy(device_type(), lgMap);
+      return rcp (new map_type (RECOMPUTE, lgMap_device, indexBase, newComm));
     }
   }
 
@@ -2053,8 +2052,6 @@ namespace Tpetra {
     if (newComm.is_null ()) {
       return null; // my process does not participate in the new Map
     } else {
-      // The default constructor that's useful for clone() above is
-      // also useful here.
       RCP<Map> map            = rcp (new Map ());
 
       map->comm_              = newComm;
@@ -2098,6 +2095,7 @@ namespace Tpetra {
       map->lgMap_ = lgMap_;
       map->lgMapHost_ = lgMapHost_;
       map->glMap_ = glMap_;
+      map->glMapHost_ = glMapHost_;
 
       // Map's default constructor creates an uninitialized Directory.
       // The Directory will be initialized on demand in
@@ -2535,7 +2533,7 @@ Tpetra::createOneToOne (const Teuchos::RCP<const Tpetra::Map<LO, GO, NT> >& M)
         cerr << os.str ();
       }
       ArrayView<const GO> myGids =
-        (myRank == 0) ? M->getNodeElementList() : Teuchos::null;
+        (myRank == 0) ? M->getLocalElementList() : Teuchos::null;
       auto retMap =
         rcp(new map_type(GINV, myGids(), M->getIndexBase(),
                          M->getComm()));
@@ -2564,8 +2562,8 @@ Tpetra::createOneToOne (const Teuchos::RCP<const Tpetra::Map<LO, GO, NT> >& M)
       cerr << os.str ();
     }
     Tpetra::Directory<LO, GO, NT> directory;
-    const size_t numMyElems = M->getNodeNumElements ();
-    ArrayView<const GO> myElems = M->getNodeElementList ();
+    const size_t numMyElems = M->getLocalNumElements ();
+    ArrayView<const GO> myElems = M->getLocalElementList ();
     Array<int> owner_procs_vec (numMyElems);
 
     if (verbose) {
@@ -2660,8 +2658,8 @@ Tpetra::createOneToOne (const Teuchos::RCP<const Tpetra::Map<LocalOrdinal,Global
     os << *prefix << "Done initializing Directory" << endl;
     cerr << os.str ();
   }
-  size_t numMyElems = M->getNodeNumElements ();
-  ArrayView<const GO> myElems = M->getNodeElementList ();
+  size_t numMyElems = M->getLocalNumElements ();
+  ArrayView<const GO> myElems = M->getLocalElementList ();
   Array<int> owner_procs_vec (numMyElems);
   if (verbose) {
     std::ostringstream os;

@@ -11,10 +11,8 @@
 
 #include "Tempus_config.hpp"
 #include "Tempus_StepperRKBase.hpp"
-#include "Tempus_RKButcherTableau.hpp"
 #include "Tempus_StepperImplicit.hpp"
 #include "Tempus_WrapperModelEvaluatorPairPartIMEX_Basic.hpp"
-#include "Tempus_StepperRKObserverComposite.hpp"
 
 
 namespace Tempus {
@@ -212,31 +210,104 @@ namespace Tempus {
  *  but again note that the explicit term, \f$f^x(X_i,Y_i,t_i)\f$,
  *  is evaluated at the implicit stage time, \f$t_i\f$.
  *
- *  <b> Partitioned IMEX-RK Algorithm </b>
+ *  <b> Algorithm </b>
  *  The single-timestep algorithm for the partitioned IMEX-RK is
- *   - \f$Z_1 \leftarrow z_{n-1}\f$ (Recall \f$Z_i = \{Y_i,X_i\}^T\f$)
- *   - for \f$i = 1 \ldots s\f$ do
- *     - \f$Y_i = y_{n-1} -\Delta t \sum_{j=1}^{i-1} \hat{a}_{ij}\;f^y_j\f$
- *     - \f$\tilde{X} \leftarrow x_{n-1} - \Delta t\,\sum_{j=1}^{i-1} \left[
- *            \hat{a}_{ij}\, f^x_j + a_{ij}\, g^x_j \right] \f$
- *     - if \f$a_{ii} = 0\f$
- *       - \f$X_i   \leftarrow \tilde{X}\f$
- *       - \f$g^x_i \leftarrow g^x(X_i,Y_i,t_i)\f$
- *     - else
- *       - Solve \f$\mathcal{G}^x(
- *           \tilde{\dot{X}} = \frac{X_i-\tilde{X}}{a_{ii} \Delta t},
- *           X_i,Y_i,t_i) = 0\f$
- *         for \f$X_i\f$ where \f$Y_i\f$ are known parameters
- *       - \f$g^x_i \leftarrow - \tilde{\dot{X}}\f$
- *     - \f$f_i \leftarrow f(Z_i,\hat{t}_i)\f$
- *     - \f$\dot{Z} \leftarrow - g(Z_i,t_i) - f(Z_i,t_i)\f$ [Optionally]
- *   - end for
- *   - \f$z_n = z_{n-1} - \Delta t\,\sum_{i=1}^{s}\hat{b}_i\, f_i\f$
- *   - \f$x_n \mathrel{+{=}} - \Delta t\,\sum_{i=1}^{s} b_i\, g^x_i\f$
  *
- *  The First-Step-As-Last (FSAL) principle is not valid for IMEX RK Partition.
+ *  \f{center}{
+ *    \parbox{5in}{
+ *    \rule{5in}{0.4pt} \\
+ *    {\bf Algorithm} Partitioned IMEX-RK \\
+ *    \rule{5in}{0.4pt} \vspace{-15pt}
+ *    \begin{enumerate}
+ *      \setlength{\itemsep}{0pt} \setlength{\parskip}{0pt} \setlength{\parsep}{0pt}
+ *      \item $Z \leftarrow z_{n-1}$
+ *            \hfill {\it * Recall $Z_i = \{Y_i,X_i\}^T$}
+ *      \item {\it appAction.execute(solutionHistory, stepper, BEGIN\_STEP)}
+ *      \item {\bf for ($i = 0 \ldots s-1$)}
+ *      \item \quad  $Y_i = y_{n-1} -\Delta t \sum_{j=1}^{i-1} \hat{a}_{ij}\;f^y_j$
+ *      \item \quad  $\tilde{X} \leftarrow x_{n-1} - \Delta t\,\sum_{j=1}^{i-1} \left[
+ *                                       \hat{a}_{ij}\, f^x_j + a_{ij}\, g^x_j \right]$
+ *      \item \quad  {\it appAction.execute(solutionHistory, stepper, BEGIN\_STAGE)}
+ *      \item \quad  \hfill {\bf Implicit Tableau}
+ *      \item \quad  {\bf if ($a_{ii} = 0$) then}
+ *      \item \qquad    $X_i   \leftarrow \tilde{X}$
+ *      \item \qquad    {\bf if ($a_{k,i} = 0 \;\forall k = (i+1,\ldots, s-1)$, $b(i) = 0$, $b^\ast(i) = 0$) then}
+ *      \item \qquad \quad  $g^x_i \leftarrow 0$
+ *                          \hfill {\it * Not needed for later calculations.}
+ *      \item \qquad    {\bf else}
+ *      \item \qquad \quad  $g^x_i \leftarrow g^x(X_i,Y_i,t_i)$
+ *      \item \qquad    {\bf endif}
+ *      \item \quad  {\bf else}
+ *      \item \qquad  {\it appAction.execute(solutionHistory, stepper, BEFORE\_SOLVE)}
+ *      \item \qquad  {\bf if (``Zero initial guess.'') then}
+ *      \item \qquad \quad   $X \leftarrow 0$
+ *                           \hfill {\it * Else use previous stage value as initial guess.}
+ *      \item \qquad  {\bf endif}
+ *      \item \qquad  {\bf Solve $\mathcal{G}^x\left(\tilde{\dot{X}}
+ *                          = \frac{X-\tilde{X}}{a_{ii} \Delta t},X,Y,t_i\right) = 0$
+ *                            for $X$ where $Y$ is known.}
+ *      \item \qquad   {\it appAction.execute(solutionHistory, stepper, AFTER\_SOLVE)}
+ *      \item \qquad   $\tilde{\dot{X}} \leftarrow \frac{X - \tilde{X}}{a_{ii} \Delta t}$
+ *      \item \qquad   $g_i \leftarrow - \tilde{\dot{X}}$
+ *      \item \quad  {\bf endif}
+ *      \item \quad  \hfill {\bf Explicit Tableau}
+ *      \item \quad  {\it appAction.execute(solutionHistory, stepper, BEFORE\_EXPLICIT\_EVAL)}
+ *      \item \quad  $f_i \leftarrow M(X,\hat{t}_i)^{-1}\, F(X,\hat{t}_i)$
+ *      \item \quad  $\dot{Z} \leftarrow - g(Z_i,t_i) - f(Z_i,t_i)$ [Optionally]
+ *      \item \quad  {\it appAction.execute(solutionHistory, stepper, END\_STAGE)}
+ *      \item {\bf end for}
+ *      \item $z_n = z_{n-1} - \Delta t\,\sum_{i=1}^{s}\hat{b}_i\, f_i$
+ *      \item $x_n \mathrel{+{=}} - \Delta t\,\sum_{i=1}^{s} b_i\, g^x_i$
+ *      \item {\it appAction.execute(solutionHistory, stepper, END\_STEP)}
+ *    \end{enumerate}
+ *    \vspace{-10pt} \rule{5in}{0.4pt}
+ *    }
+ *  \f}
+ *
+ *  The following table contains the pre-coded IMEX-RK tableaus.
+ *  <table>
+ *  <caption id="multi_row_part">Partitioned IMEX-RK Tableaus</caption>
+ *  <tr><th> Name  <th> Order <th> Implicit Tableau <th> Explicit Tableau
+ *  <tr><td> Partitioned IMEX RK 1st order  <td> 1st
+ *      <td> \f[ \begin{array}{c|cc}
+ *             0 & 0 & 0 \\
+ *             1 & 0 & 1 \\ \hline
+ *               & 0 & 1
+ *           \end{array} \f]
+ *      <td> \f[ \begin{array}{c|cc}
+ *             0 & 0 & 0 \\
+ *             1 & 1 & 0 \\ \hline
+ *               & 1 & 0
+ *           \end{array} \f]
+ *  <tr><td> Partitioned IMEX RK SSP2\n \f$\gamma = 1-1/\sqrt{2}\f$ <td> 2nd
+ *      <td> \f[ \begin{array}{c|cc}
+ *             \gamma   & \gamma & 0 \\
+ *             1-\gamma & 1-2\gamma & \gamma \\ \hline
+ *                      & 1/2       & 1/2
+ *           \end{array} \f]
+ *      <td> \f[ \begin{array}{c|cc}
+ *             0 & 0   & 0 \\
+ *             1 & 1   & 0 \\ \hline
+ *               & 1/2 & 1/2
+ *           \end{array} \f]
+ *  <tr><td> Partitioned IMEX RK ARS 233\n \f$\gamma = (3+\sqrt{3})/6\f$ <td> 3rd
+ *      <td> \f[ \begin{array}{c|ccc}
+ *             0        & 0      & 0         & 0      \\
+ *             \gamma   & 0      & \gamma    & 0      \\
+ *             1-\gamma & 0      & 1-2\gamma & \gamma \\ \hline
+ *                      & 0      & 1/2       & 1/2
+ *           \end{array} \f]
+ *      <td> \f[ \begin{array}{c|ccc}
+ *             0        & 0        & 0         & 0 \\
+ *             \gamma   & \gamma   & 0         & 0 \\
+ *             1-\gamma & \gamma-1 & 2-2\gamma & 0 \\ \hline
+ *                      & 0        & 1/2       & 1/2
+ *           \end{array} \f]
+ *  </table>
+ *
+ *  The First-Same-As-Last (FSAL) principle is not valid for IMEX RK Partition.
  *  The default is to set useFSAL=false, and useFSAL=true will result
- *  in an error.
+ *  in a warning.
  *
  *  #### References
  *  -# Shadid, Cyr, Pawlowski, Widley, Scovazzi, Zeng, Phillips, Conde,
@@ -256,17 +327,17 @@ public:
    *  Requires subsequent setModel(), setSolver() and initialize()
    *  calls before calling takeStep().
   */
-  StepperIMEX_RK_Partition();
+  StepperIMEX_RK_Partition(std::string stepperType = "Partitioned IMEX RK SSP2");
 
-  /// Constructor to specialize Stepper parameters.
+  /// Constructor to for all member data.
   StepperIMEX_RK_Partition(
     const Teuchos::RCP<const Thyra::ModelEvaluator<Scalar> >& appModel,
-    const Teuchos::RCP<StepperObserver<Scalar> >& obs,
     const Teuchos::RCP<Thyra::NonlinearSolverBase<Scalar> >& solver,
     bool useFSAL,
     std::string ICConsistency,
     bool ICConsistencyCheck,
     bool zeroInitialGuess,
+    const Teuchos::RCP<StepperRKAppAction<Scalar> >& stepperRKAppAction,
     std::string stepperType,
     Teuchos::RCP<const RKButcherTableau<Scalar> > explicitTableau,
     Teuchos::RCP<const RKButcherTableau<Scalar> > implicitTableau,
@@ -274,14 +345,30 @@ public:
 
   /// \name Basic stepper methods
   //@{
+    /// Returns the explicit tableau!
+    virtual Teuchos::RCP<const RKButcherTableau<Scalar> > getTableau() const
+    { return getExplicitTableau(); }
+
     /// Set both the explicit and implicit tableau from ParameterList
     virtual void setTableaus(std::string stepperType = "",
       Teuchos::RCP<const RKButcherTableau<Scalar> > explicitTableau = Teuchos::null,
       Teuchos::RCP<const RKButcherTableau<Scalar> > implicitTableau = Teuchos::null);
 
+    virtual void setTableausPartition(
+      Teuchos::RCP<Teuchos::ParameterList> pl,
+      std::string stepperType);
+
+    /// Return explicit tableau.
+    virtual Teuchos::RCP<const RKButcherTableau<Scalar> > getExplicitTableau() const
+    { return explicitTableau_; }
+
     /// Set the explicit tableau from tableau
     virtual void setExplicitTableau(
       Teuchos::RCP<const RKButcherTableau<Scalar> > explicitTableau);
+
+    /// Return implicit tableau.
+    virtual Teuchos::RCP<const RKButcherTableau<Scalar> > getImplicitTableau() const
+    { return implicitTableau_; }
 
     /// Set the implicit tableau from tableau
     virtual void setImplicitTableau(
@@ -290,7 +377,7 @@ public:
     virtual void setModel(
       const Teuchos::RCP<const Thyra::ModelEvaluator<Scalar> >& appModel);
 
-    virtual Teuchos::RCP<const Thyra::ModelEvaluator<Scalar> > getModel()
+    virtual Teuchos::RCP<const Thyra::ModelEvaluator<Scalar> > getModel() const
      { return this->wrapperModel_; }
 
     virtual void setModelPair(
@@ -300,12 +387,6 @@ public:
     virtual void setModelPair(
       const Teuchos::RCP<const Thyra::ModelEvaluator<Scalar> >& explicitModel,
       const Teuchos::RCP<const Thyra::ModelEvaluator<Scalar> >& implicitModel);
-
-    virtual void setObserver(
-      Teuchos::RCP<StepperObserver<Scalar> > obs = Teuchos::null);
-
-    virtual Teuchos::RCP<StepperObserver<Scalar> > getObserver() const
-    { return this->stepperObserver_; }
 
     /// Initialize during construction and after changing input parameters.
     virtual void initialize();
@@ -326,17 +407,15 @@ public:
     virtual bool isExplicit()         const {return true;}
     virtual bool isImplicit()         const {return true;}
     virtual bool isExplicitImplicit() const
-      {return isExplicit() and isImplicit();}
+      {return isExplicit() && isImplicit();}
     virtual bool isOneStepMethod()   const {return true;}
     virtual bool isMultiStepMethod() const {return !isOneStepMethod();}
-
     virtual OrderODE getOrderODE()   const {return FIRST_ORDER_ODE;}
   //@}
 
-  Teuchos::RCP<Thyra::VectorBase<Scalar> >& getStageZ() {return stageZ_;};
-  std::vector<Teuchos::RCP<Thyra::VectorBase<Scalar> > >& getStageF() {return stageF_;};
-  std::vector<Teuchos::RCP<Thyra::VectorBase<Scalar> > >& getStageGx() {return stageGx_;};
-  Teuchos::RCP<Thyra::VectorBase<Scalar> >& getXTilde() {return xTilde_;};
+  std::vector<Teuchos::RCP<Thyra::VectorBase<Scalar> > >& getStageF() {return stageF_;}
+  std::vector<Teuchos::RCP<Thyra::VectorBase<Scalar> > >& getStageGx() {return stageGx_;}
+  Teuchos::RCP<Thyra::VectorBase<Scalar> >& getXTilde() {return xTilde_;}
 
   /// Return alpha = d(xDot)/dx.
   virtual Scalar getAlpha(const Scalar dt) const
@@ -377,13 +456,10 @@ protected:
 
   Scalar order_;
 
-  Teuchos::RCP<Thyra::VectorBase<Scalar> >               stageZ_;
   std::vector<Teuchos::RCP<Thyra::VectorBase<Scalar> > > stageF_;
   std::vector<Teuchos::RCP<Thyra::VectorBase<Scalar> > > stageGx_;
 
   Teuchos::RCP<Thyra::VectorBase<Scalar> >               xTilde_;
-
-  Teuchos::RCP<StepperRKObserverComposite<Scalar> >      stepperObserver_;
 
 };
 
@@ -439,6 +515,16 @@ private:
   Teuchos::RCP<const Thyra::VectorBase<Scalar> > xTilde_;
   Scalar                                         s_;      // = 1/(dt*a_ii)
 };
+
+
+/// Nonmember constructor - ModelEvaluator and ParameterList
+// ------------------------------------------------------------------------
+template<class Scalar>
+Teuchos::RCP<StepperIMEX_RK_Partition<Scalar> >
+createStepperIMEX_RK_Partition(
+  const Teuchos::RCP<const Thyra::ModelEvaluator<Scalar> >& model,
+  std::string stepperType,
+  Teuchos::RCP<Teuchos::ParameterList> pl);
 
 
 } // namespace Tempus

@@ -89,6 +89,9 @@ typedef MueLu::LWGraph<LocalOrdinal,GlobalOrdinal,Node> LWGraph;
 #ifdef MUELU_LWGRAPH_KOKKOS_SHORT
 typedef MueLu::LWGraph_kokkos<LocalOrdinal,GlobalOrdinal,Node> LWGraph_kokkos;
 #endif
+#ifdef MUELU_LOCALLWGRAPH_KOKKOS_SHORT
+typedef MueLu::LocalLWGraph_kokkos<LocalOrdinal,GlobalOrdinal,Node> LocalLWGraph_kokkos;
+#endif
 #ifdef MUELU_LEFTOVERAGGREGATIONALGORITHM_SHORT
 typedef MueLu::LeftoverAggregationAlgorithm<LocalOrdinal,GlobalOrdinal,Node> LeftoverAggregationAlgorithm;
 #endif
@@ -97,6 +100,9 @@ typedef MueLu::LocalAggregationAlgorithm<LocalOrdinal,GlobalOrdinal,Node> LocalA
 #endif
 #ifdef MUELU_LOCALLEXICOGRAPHICINDEXMANAGER_SHORT
 typedef MueLu::LocalLexicographicIndexManager<LocalOrdinal,GlobalOrdinal,Node> LocalLexicographicIndexManager;
+#endif
+#ifdef MUELU_LOCALORDINALTRANSFERFACTORY_SHORT
+typedef MueLu::LocalOrdinalTransferFactory<LocalOrdinal,GlobalOrdinal,Node> LocalOrdinalTransferFactory;
 #endif
 #ifdef MUELU_ONEPTAGGREGATIONALGORITHM_SHORT
 typedef MueLu::OnePtAggregationAlgorithm<LocalOrdinal,GlobalOrdinal,Node> OnePtAggregationAlgorithm;

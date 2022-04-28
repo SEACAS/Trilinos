@@ -6,22 +6,10 @@
 // ****************************************************************************
 // @HEADER
 
-#include "Teuchos_UnitTestHarness.hpp"
+#include "Tempus_UnitTest_RK_Utils.hpp"
+
 #include "Teuchos_XMLParameterListHelpers.hpp"
-#include "Teuchos_TimeMonitor.hpp"
-#include "Teuchos_DefaultComm.hpp"
 
-#include "Thyra_VectorStdOps.hpp"
-
-#include "Tempus_StepperFactory.hpp"
-#include "Tempus_UnitTest_Utils.hpp"
-
-#include "../TestModels/SinCosModel.hpp"
-#include "../TestModels/VanDerPolModel.hpp"
-#include "../TestUtils/Tempus_ConvergenceTestUtils.hpp"
-
-#include <fstream>
-#include <vector>
 
 namespace Tempus_Unit_Test {
 
@@ -31,16 +19,17 @@ using Teuchos::rcp_const_cast;
 using Teuchos::rcp_dynamic_cast;
 using Teuchos::ParameterList;
 using Teuchos::sublist;
-using Teuchos::getParametersFromXmlFile;
-
-using Tempus::StepperFactory;
 
 
 // ************************************************************
 // ************************************************************
 TEUCHOS_UNIT_TEST(DIRK_BackwardEuler, Default_Construction)
 {
-  testDIRKAccessorsFullConstruction("RK Backward Euler");
+  auto stepper = rcp(new Tempus::StepperDIRK_BackwardEuler<double>());
+  testDIRKAccessorsFullConstruction(stepper);
+
+  // Test stepper properties.
+  TEUCHOS_ASSERT(stepper->getOrder() == 1);
 }
 
 
@@ -54,10 +43,40 @@ TEUCHOS_UNIT_TEST(DIRK_BackwardEuler, StepperFactory_Construction)
 
 
 // ************************************************************
+//* Test: construct the integrator from PL and make sure that
+//* the solver PL is the same as the provided solver PL
+//* and not the default solver PL
+// ************************************************************
+
+TEUCHOS_UNIT_TEST(DIRK_BackwardEuler, App_PL)
+{
+  auto model = rcp(new Tempus_Test::SinCosModel<double>());
+
+  // read the params from xml file
+  auto pList = Teuchos::getParametersFromXmlFile("Tempus_DIRK_VanDerPol.xml");
+  auto pl = sublist(pList, "Tempus", true);
+  auto appSolverPL = pl->sublist("App Stepper").sublist("App Solver");
+
+
+  // setup the Integrator
+  auto integrator = Tempus::createIntegratorBasic<double>(pl, model);
+  auto stepperSolverPL = Teuchos::ParameterList();
+  stepperSolverPL.set("NOX", *(integrator->getStepper()->getSolver()->getParameterList()));
+
+  // make sure the app Solver PL is being used
+  TEUCHOS_ASSERT( Teuchos::haveSameValues(appSolverPL, stepperSolverPL) );
+
+}
+
+
+
+// ************************************************************
 // ************************************************************
 TEUCHOS_UNIT_TEST(DIRK_BackwardEuler, AppAction)
 {
-  testRKAppAction("RK Backward Euler", out, success);
+  auto stepper = rcp(new Tempus::StepperDIRK_BackwardEuler<double>());
+  auto model = rcp(new Tempus_Test::SinCosModel<double>());
+  testRKAppAction(stepper, model, out, success);
 }
 
 

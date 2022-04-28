@@ -1,39 +1,13 @@
-// Copyright(C) 1999-2018, 2020 National Technology & Engineering Solutions
+// Copyright(C) 1999-2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
-#include <cgns/Iocgns_Defines.h>
-
+#include <Ioss_Assembly.h>
 #include <Ioss_Beam2.h>
 #include <Ioss_Beam3.h>
+#include <Ioss_CodeTypes.h>
 #include <Ioss_FaceGenerator.h>
 #include <Ioss_Hex20.h>
 #include <Ioss_Hex27.h>
@@ -45,6 +19,7 @@
 #include <Ioss_Quad4.h>
 #include <Ioss_Quad8.h>
 #include <Ioss_Quad9.h>
+#include <Ioss_Sort.h>
 #include <Ioss_Spring2.h>
 #include <Ioss_Spring3.h>
 #include <Ioss_StructuredBlock.h>
@@ -54,6 +29,7 @@
 #include <Ioss_Tri4.h>
 #include <Ioss_Tri6.h>
 #include <Ioss_Unknown.h>
+#include <Ioss_Utils.h>
 #include <Ioss_Wedge15.h>
 #include <Ioss_Wedge18.h>
 #include <Ioss_Wedge6.h>
@@ -75,12 +51,25 @@
 #include <cgnslib.h>
 #endif
 
+#include <cgns/Iocgns_Defines.h>
+
 #define CGERR(funcall)                                                                             \
   if ((funcall) != CG_OK) {                                                                        \
     Iocgns::Utils::cgns_error(file_ptr, __FILE__, __func__, __LINE__, -1);                         \
   }
 
 namespace {
+#if defined(__IOSS_WINDOWS__)
+  const char *strcasestr(const char *haystack, const char *needle)
+  {
+    std::string lneedle(Ioss::Utils::lowercase(needle));
+    std::string lhaystack(Ioss::Utils::lowercase(haystack));
+
+    auto pos = lhaystack.find(lneedle);
+    return pos != std::string::npos ? haystack + pos : nullptr;
+  }
+#endif
+
   int power_2(int count)
   {
     // Return the maximum power of two which is less than or equal to 'count'
@@ -180,14 +169,15 @@ namespace {
     return val;
   }
 
-  ssize_t proc_with_minimum_work(Iocgns::StructuredZoneData *zone, const std::vector<size_t> &work,
-                                 std::set<std::pair<int, int>> &proc_adam_map)
+  int proc_with_minimum_work(Iocgns::StructuredZoneData *zone, const std::vector<size_t> &work,
+                             std::set<std::pair<int, int>> &proc_adam_map)
   {
-    size_t  min_work = std::numeric_limits<size_t>::max();
-    ssize_t min_proc = -1;
-    for (ssize_t i = 0; i < (ssize_t)work.size(); i++) {
+    size_t min_work = std::numeric_limits<size_t>::max();
+    int    min_proc = -1;
+    for (int i = 0; i < static_cast<int>(work.size()); i++) {
       if (work[i] < min_work &&
-          proc_adam_map.find(std::make_pair(zone->m_adam->m_zone, i)) == proc_adam_map.end()) {
+          proc_adam_map.find(std::make_pair(zone->m_adam->m_zone, static_cast<int>(i))) ==
+              proc_adam_map.end()) {
         min_work = work[i];
         min_proc = i;
         if (min_work == 0) {
@@ -198,20 +188,19 @@ namespace {
     return min_proc;
   }
   void add_bc_to_block(Ioss::StructuredBlock *block, const std::string &boco_name,
-                       const std::string &fam_name, int ibc, cgsize_t *range, CG_BCType_t bocotype,
-                       bool is_parallel_io)
+                       const std::string &fam_name, int ibc, cgsize_t *range,
+                       CGNS_ENUMT(BCType_t) bocotype, bool is_parallel_io)
   {
     Ioss::SideSet *sset = block->get_database()->get_region()->get_sideset(fam_name);
     if (sset == nullptr) {
       if (block->get_database()->parallel_rank() == 0) {
-        fmt::print(
-            IOSS_WARNING,
-            "WARNING: On block '{}', found the boundary condition named '{}' in family '{}'.\n"
-            "         This family was not previously defined at the top-level of the file"
-            " which is not normal.\n"
-            "         Check your file to make sure this does not "
-            "indicate a problem with the mesh.\n",
-            block->name(), boco_name, fam_name);
+        fmt::print(Ioss::WARNING(),
+                   "On block '{}', found the boundary condition named '{}' in family '{}'.\n"
+                   "         This family was not previously defined at the top-level of the file"
+                   " which is not normal.\n"
+                   "         Check your file to make sure this does not "
+                   "indicate a problem with the mesh.\n",
+                   block->name(), boco_name, fam_name);
       }
 
       // Need to create a new sideset since didn't see this earlier.
@@ -271,8 +260,8 @@ namespace {
     if (sset->property_exists("bc_type")) {
       // Check that the 'bocotype' value matches the value of the property.
       auto old_bocotype = sset->get_property("bc_type").get_int();
-      if (old_bocotype != bocotype && bocotype != CG_FamilySpecified) {
-        fmt::print(IOSS_WARNING,
+      if (old_bocotype != bocotype && bocotype != CGNS_ENUMV(FamilySpecified)) {
+        fmt::print(Ioss::WARNING(),
                    "On sideset '{}', the boundary condition type was previously set to {}"
                    " which does not match the current value of {}. It will keep the old value.\n",
                    sset->name(), old_bocotype, bocotype);
@@ -298,7 +287,7 @@ namespace {
     // broadcast back...
     // Need: 'name' and 'VariableType'.  Assume all are double and the
     // size will be processor dependent.
-    auto &           sblocks = region->get_structured_blocks();
+    auto            &sblocks = region->get_structured_blocks();
     std::vector<int> fld_count;
     fld_count.reserve(sblocks.size());
     for (const auto &block : sblocks) {
@@ -314,9 +303,8 @@ namespace {
 
     size_t offset = 0;
     for (size_t i = 0; i < sblocks.size(); i++) {
-      const auto &   block = sblocks[i];
-      Ioss::NameList fields;
-      block->field_describe(Ioss::Field::TRANSIENT, &fields);
+      const auto    &block  = sblocks[i];
+      Ioss::NameList fields = block->field_describe(Ioss::Field::TRANSIENT);
       if (!fields.empty()) {
         for (const auto &field_name : fields) {
           const Ioss::Field &field = block->get_fieldref(field_name);
@@ -362,13 +350,13 @@ namespace {
   }
 
 #if IOSS_DEBUG_OUTPUT
-  void output_table(const Ioss::ElementBlockContainer &            ebs,
+  void output_table(const Ioss::ElementBlockContainer             &ebs,
                     std::map<std::string, Ioss::FaceUnorderedSet> &boundary_faces)
   {
     // Get maximum name and face_count length...
     size_t max_name = std::string("Block Name").length();
     size_t max_face = std::string("Face Count").length();
-    for (auto eb : ebs) {
+    for (auto &eb : ebs) {
       const std::string &name = eb->name();
       if (name.length() > max_name) {
         max_name = name.length();
@@ -382,10 +370,10 @@ namespace {
     fmt::print("\t+{2:-^{0}}+{2:-^{1}}+\n", max_name, max_face, "");
     fmt::print("\t|{2:^{0}}|{3:^{1}}|\n", max_name, max_face, "Block Name", "Face Count");
     fmt::print("\t+{2:-^{0}}+{2:-^{1}}+\n", max_name, max_face, "");
-    for (auto eb : ebs) {
+    for (auto &eb : ebs) {
       const std::string &name = eb->name();
-      fmt::print("\t|{2:^{0}}|{3:{1}n}  |\n", max_name, max_face - 2, name,
-                 boundary_faces[name].size());
+      fmt::print("\t|{2:^{0}}|{3:{1}}  |\n", max_name, max_face - 2, name,
+                 fmt::group_digits(boundary_faces[name].size()));
     }
     fmt::print("\t+{2:-^{0}}+{2:-^{1}}+\n", max_name, max_face, "");
   }
@@ -458,19 +446,19 @@ Ioss::MeshType Iocgns::Utils::check_mesh_type(int cgns_file_ptr)
   int num_zones = 0;
   CGCHECKNP(cg_nzones(cgns_file_ptr, base, &num_zones));
 
-  CG_ZoneType_t common_zone_type = CG_ZoneTypeNull;
+  CGNS_ENUMT(ZoneType_t) common_zone_type = CGNS_ENUMV(ZoneTypeNull);
 
   for (int zone = 1; zone <= num_zones; zone++) {
-    CG_ZoneType_t zone_type;
+    CGNS_ENUMT(ZoneType_t) zone_type;
     CGCHECKNP(cg_zone_type(cgns_file_ptr, base, zone, &zone_type));
 
-    if (common_zone_type == CG_ZoneTypeNull) {
+    if (common_zone_type == CGNS_ENUMV(ZoneTypeNull)) {
       common_zone_type = zone_type;
     }
 
     if (common_zone_type != zone_type) {
 #if IOSS_ENABLE_HYBRID
-      common_zone_type = CG_ZoneTypeUserDefined; // This is how we represent hybrid...
+      common_zone_type = CGNS_ENUMV(ZoneTypeUserDefined); // This is how we represent hybrid...
       break;
 #else
       std::ostringstream errmsg;
@@ -484,9 +472,9 @@ Ioss::MeshType Iocgns::Utils::check_mesh_type(int cgns_file_ptr)
   }
 
   switch (common_zone_type) {
-  case CG_ZoneTypeUserDefined: return Ioss::MeshType::HYBRID;
-  case CG_Structured: return Ioss::MeshType::STRUCTURED;
-  case CG_Unstructured: return Ioss::MeshType::UNSTRUCTURED;
+  case CGNS_ENUMV(ZoneTypeUserDefined): return Ioss::MeshType::HYBRID;
+  case CGNS_ENUMV(Structured): return Ioss::MeshType::STRUCTURED;
+  case CGNS_ENUMV(Unstructured): return Ioss::MeshType::UNSTRUCTURED;
   default: return Ioss::MeshType::UNKNOWN;
   }
 }
@@ -571,15 +559,20 @@ int Iocgns::Utils::get_db_zone(const Ioss::GroupingEntity *entity)
   IOSS_ERROR(errmsg);
 }
 
-size_t Iocgns::Utils::index(const Ioss::Field &field) { return field.get_index() & 0xffffffff; }
+namespace {
+  const size_t CG_CELL_CENTER_FIELD_ID = 1ul << 30;
+  const size_t CG_VERTEX_FIELD_ID      = 1ul << 31;
+} // namespace
+
+size_t Iocgns::Utils::index(const Ioss::Field &field) { return field.get_index() & 0x00ffffff; }
 
 void Iocgns::Utils::set_field_index(const Ioss::Field &field, size_t index,
-                                    CG_GridLocation_t location)
+                                    CGNS_ENUMT(GridLocation_t) location)
 {
-  if (location == CG_CellCenter) {
+  if (location == CGNS_ENUMV(CellCenter)) {
     index |= CG_CELL_CENTER_FIELD_ID;
   }
-  if (location == CG_Vertex) {
+  if (location == CGNS_ENUMV(Vertex)) {
     index |= CG_VERTEX_FIELD_ID;
   }
   field.set_index(index);
@@ -602,7 +595,7 @@ bool Iocgns::Utils::is_cell_field(const Ioss::Field &field)
 }
 
 namespace {
-#ifdef SEACAS_HAVE_MPI
+#if CG_BUILD_PARALLEL
   void union_zgc_range(Ioss::ZoneConnectivity &zgc_i, const Ioss::ZoneConnectivity &zgc_j)
   {
     assert(zgc_i.m_transform == zgc_j.m_transform);
@@ -646,7 +639,7 @@ namespace {
     // CGNS_MAX_NAME_LENGTH characters + 17 ints / connection.
 
     PAR_UNUSED(region);
-#ifdef SEACAS_HAVE_MPI
+#if CG_BUILD_PARALLEL
     const int BYTE_PER_NAME = CGNS_MAX_NAME_LENGTH;
     const int INT_PER_ZGC   = 17;
     // Gather all to processor 0, consolidate, and then scatter back...
@@ -756,9 +749,9 @@ namespace {
       assert(off_name % count == 0 && off_name / count == BYTE_PER_NAME);
 
 #if IOSS_DEBUG_OUTPUT
-      fmt::print(stderr, "ZGC_CONSOLIDATE: Before consolidation: ({})\n", zgc.size());
+      fmt::print(Ioss::DEBUG(), "ZGC_CONSOLIDATE: Before consolidation: ({})\n", zgc.size());
       for (const auto &z : zgc) {
-        fmt::print(stderr, "\tOZ {}{}\n", z.m_ownerZone, z);
+        fmt::print(Ioss::DEBUG(), "\tOZ {}{}\n", z.m_ownerZone, z);
       }
 #endif
 
@@ -814,21 +807,19 @@ namespace {
       assert(off_name % count == 0 && off_name / count == BYTE_PER_NAME);
 
 #if IOSS_DEBUG_OUTPUT
-      fmt::print(stderr, "ZGC_CONSOLIDATE: After consolidation: ({})\n", zgc.size());
+      fmt::print(Ioss::DEBUG(), "ZGC_CONSOLIDATE: After consolidation: ({})\n", zgc.size());
       for (const auto &z : zgc) {
-        fmt::print(stderr, "\tOZ {}{}\n", z.m_ownerZone, z);
+        fmt::print(Ioss::DEBUG(), "\tOZ {}{}\n", z.m_ownerZone, z);
       }
 #endif
     } // End of processor 0 only processing...
 
     // Send the list of unique zgc instances to all processors so they can all output.
-    MPI_Bcast(&count, 1, MPI_INT, 0, region.get_database()->util().communicator());
+    region.get_database()->util().broadcast(count);
     snd_zgc_name.resize(count * BYTE_PER_NAME);
     snd_zgc_data.resize(count * INT_PER_ZGC);
-    MPI_Bcast(snd_zgc_name.data(), (int)snd_zgc_name.size(), MPI_BYTE, 0,
-              region.get_database()->util().communicator());
-    MPI_Bcast(snd_zgc_data.data(), (int)snd_zgc_data.size(), MPI_INT, 0,
-              region.get_database()->util().communicator());
+    region.get_database()->util().broadcast(snd_zgc_name);
+    region.get_database()->util().broadcast(snd_zgc_data);
 
     // Now clean out existing ZGC lists for all blocks and add on the consolidated instances.
     // Also create a vector for mapping from zone to sb name.
@@ -870,6 +861,141 @@ namespace {
   }
 } // namespace
 
+void Iocgns::Utils::output_assembly(int file_ptr, const Ioss::Assembly *assembly,
+                                    bool is_parallel_io, bool appending)
+{
+  int base = 1;
+  int fam  = 0;
+  CGERR(cg_family_write(file_ptr, base, assembly->name().c_str(), &fam));
+
+  int64_t id = assembly->get_optional_property("id", 0);
+  CGERR(cg_goto(file_ptr, base, "Family_t", fam, nullptr));
+  CGERR(cg_descriptor_write("FamVC_TypeId", "0"));
+  CGERR(cg_descriptor_write("FamVC_TypeName", "Unspecified"));
+  CGERR(cg_descriptor_write("FamVC_UserId", std::to_string(id).c_str()));
+  CGERR(cg_descriptor_write("FamVC_UserName", assembly->name().c_str()));
+
+  const auto &members = assembly->get_members();
+  // Now, iterate the members of the assembly and add the reference to the structured block
+  if (assembly->get_member_type() == Ioss::STRUCTUREDBLOCK) {
+    for (const auto &mem : members) {
+      base           = mem->get_property("base").get_int();
+      const auto *sb = dynamic_cast<const Ioss::StructuredBlock *>(mem);
+      Ioss::Utils::check_dynamic_cast(sb);
+      if (is_parallel_io || sb->is_active()) {
+        int db_zone = get_db_zone(sb);
+        if (cg_goto(file_ptr, base, "Zone_t", db_zone, "end") == CG_OK) {
+          CGERR(cg_famname_write(assembly->name().c_str()));
+        }
+      }
+    }
+  }
+  else if (assembly->get_member_type() == Ioss::ELEMENTBLOCK) {
+    for (const auto &mem : members) {
+      if (appending) {
+        // Modifying an existing database so the element blocks
+        // should exist on the output database...
+        int db_zone = get_db_zone(mem);
+        if (cg_goto(file_ptr, base, "Zone_t", db_zone, "end") == CG_OK) {
+          CGERR(cg_famname_write(assembly->name().c_str()));
+        }
+      }
+      else {
+        // The element blocks have not yet been output.  To make
+        // it easier when they are written, add a property that
+        // specifies what assembly they are in.  Currently, the way
+        // CGNS represents assemblies limits membership to at most one
+        // assembly.
+        auto *new_mem = const_cast<Ioss::GroupingEntity *>(mem);
+        new_mem->property_add(Ioss::Property("assembly", assembly->name()));
+      }
+    }
+  }
+}
+
+void Iocgns::Utils::output_assemblies(int file_ptr, const Ioss::Region &region, bool is_parallel_io)
+{
+  region.get_database()->progress("\tOutput Assemblies");
+  const auto &assemblies = region.get_assemblies();
+  for (const auto &assem : assemblies) {
+    output_assembly(file_ptr, assem, is_parallel_io);
+  }
+}
+void Iocgns::Utils::write_state_meta_data(int file_ptr, const Ioss::Region &region,
+                                          bool is_parallel_io)
+{
+  // Write the metadata to the state file...
+  // Not everything is needed, we just need the zones output so we can put the FlowSolutionPointers
+  // node under the Zone nodes.
+  int base           = 0;
+  int phys_dimension = region.get_property("spatial_dimension").get_int();
+  CGERR(cg_base_write(file_ptr, "Base", phys_dimension, phys_dimension, &base));
+
+  region.get_database()->progress("\tElement Blocks");
+  const Ioss::ElementBlockContainer &ebs = region.get_element_blocks();
+  for (auto &eb : ebs) {
+    const std::string &name    = eb->name();
+    int                db_zone = 0;
+    cgsize_t           size[3] = {0, 0, 0};
+    size[1]                    = eb->get_property("zone_element_count").get_int();
+    size[0]                    = eb->get_property("zone_node_count").get_int();
+
+    if (is_parallel_io) {}
+
+    CGERR(cg_zone_write(file_ptr, base, name.c_str(), size, CGNS_ENUMV(Unstructured), &db_zone));
+    int prev_db_zone = get_db_zone(eb);
+    if (db_zone != prev_db_zone) {
+      std::ostringstream errmsg;
+      fmt::print(
+          errmsg,
+          "ERROR: CGNS: The 'db_zone' does not match in the state file {} and the base file {}.",
+          db_zone, prev_db_zone);
+      IOSS_ERROR(errmsg);
+    }
+  }
+
+  region.get_database()->progress("\tStructured Blocks");
+  const auto &structured_blocks = region.get_structured_blocks();
+
+  // If `is_parallel` and `!is_parallel_io`, then writing file-per-processor
+  bool is_parallel = region.get_database()->util().parallel_size() > 1;
+  int  rank        = region.get_database()->util().parallel_rank();
+  for (const auto &sb : structured_blocks) {
+    cgsize_t size[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (is_parallel_io) {
+      size[3] = sb->get_property("ni_global").get_int();
+      size[4] = sb->get_property("nj_global").get_int();
+      size[5] = sb->get_property("nk_global").get_int();
+    }
+    else {
+      size[3] = sb->get_property("ni").get_int();
+      size[4] = sb->get_property("nj").get_int();
+      size[5] = sb->get_property("nk").get_int();
+    }
+    size[0] = size[3] + 1;
+    size[1] = size[4] + 1;
+    size[2] = size[5] + 1;
+
+    if (is_parallel_io || sb->is_active()) {
+      std::string name = sb->name();
+      if (is_parallel && !is_parallel_io) {
+        name += "_proc-";
+        name += std::to_string(rank);
+      }
+      int db_zone = 0;
+      CGERR(cg_zone_write(file_ptr, base, name.c_str(), size, CGNS_ENUMV(Structured), &db_zone));
+      if (db_zone != sb->get_property("db_zone").get_int()) {
+        std::ostringstream errmsg;
+        fmt::print(
+            errmsg,
+            "ERROR: CGNS: The 'db_zone' does not match in the state file {} and the base file {}.",
+            db_zone, sb->get_property("db_zone").get_int());
+        IOSS_ERROR(errmsg);
+      }
+    }
+  }
+}
+
 size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &region,
                                              std::vector<size_t> &zone_offset, bool is_parallel_io)
 {
@@ -894,7 +1020,7 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
   std::string version = "IOSS: CGNS Writer version " + std::string{__DATE__} + ", " +
                         Ioss::Utils::platform_information();
 
-#ifdef SEACAS_HAVE_MPI
+#if CG_BUILD_PARALLEL
   if (is_parallel_io) {
     // Need to make sure the version string is the same on all
     // processors since they are all writing to the same file.  There
@@ -902,11 +1028,7 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
     // platform_information() contained different node info ("ser9"
     // and "ser43") on certain ranks which caused an HDF5 failure way
     // downstream -- basically at file close.
-    char tmp[2048];
-    Ioss::Utils::copy_string(tmp, version, 2048);
-    MPI_Bcast(tmp, (int)version.size() + 1, MPI_BYTE, 0,
-              region.get_database()->util().communicator());
-    version = std::string{tmp};
+    region.get_database()->util().broadcast(version);
   }
 #endif
 
@@ -924,21 +1046,18 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
     int fam = 0;
     CGERR(cg_family_write(file_ptr, base, ss->name().c_str(), &fam));
 
-    int         bc_index = 0;
-    CG_BCType_t bocotype = CG_BCTypeNull;
+    int bc_index                  = 0;
+    CGNS_ENUMT(BCType_t) bocotype = CGNS_ENUMV(BCTypeNull);
     if (ss->property_exists("bc_type")) {
-      bocotype = (CG_BCType_t)ss->get_property("bc_type").get_int();
+      bocotype = (CGNS_ENUMT(BCType_t))ss->get_property("bc_type").get_int();
     }
 
-    int64_t id = fam;
-    if (ss->property_exists("id")) {
-      id = ss->get_property("id").get_int();
-    }
+    int64_t id = ss->get_optional_property("id", fam);
 
     CGERR(cg_fambc_write(file_ptr, base, fam, "FamBC", bocotype, &bc_index));
     CGERR(cg_goto(file_ptr, base, "Family_t", fam, nullptr));
     CGERR(cg_descriptor_write("FamBC_TypeId", std::to_string(bocotype).c_str()));
-    CGERR(cg_descriptor_write("FamBC_TypeName", BCTypeName[bocotype]));
+    CGERR(cg_descriptor_write("FamBC_TypeName", cg_BCTypeName(bocotype)));
     CGERR(cg_descriptor_write("FamBC_UserId", std::to_string(id).c_str()));
     CGERR(cg_descriptor_write("FamBC_UserName", ss->name().c_str()));
   }
@@ -952,7 +1071,7 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
   size_t element_count = 0;
   for (const auto &eb : element_blocks) {
     int64_t local_count = eb->entity_count();
-#ifdef SEACAS_HAVE_MPI
+#if CG_BUILD_PARALLEL
     if (is_parallel_io) {
       int64_t start = 0;
       MPI_Exscan(&local_count, &start, 1, Ioss::mpi_type(start), MPI_SUM,
@@ -995,9 +1114,8 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
         name += std::to_string(rank);
       }
       int db_zone = 0;
-      CGERR(cg_zone_write(file_ptr, base, name.c_str(), size, CG_Structured, &db_zone));
+      CGERR(cg_zone_write(file_ptr, base, name.c_str(), size, CGNS_ENUMV(Structured), &db_zone));
       sb->property_update("db_zone", db_zone);
-
       // Add GridCoordinates Node...
       int grid_idx = 0;
       CGERR(cg_grid_write(file_ptr, base, db_zone, "GridCoordinates", &grid_idx));
@@ -1011,6 +1129,12 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
     sb->property_update("zone", zone);
     sb->property_update("base", base);
   }
+
+  // TODO: Are there multi-level assemblies in CGNS?
+  // Output the assembly data.
+  // The assembly itself is Family data at top level.
+  // For each assembly, iterate members and add the 'FamilyName' node linking it to the Assembly
+  output_assemblies(file_ptr, region, is_parallel_io);
 
   region.get_database()->progress("\tMapping sb_name to zone");
   if (is_parallel_io || !is_parallel) { // Only for single file output or serial...
@@ -1062,7 +1186,7 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
       region.get_database()->progress("\t\tBoundary Conditions");
     }
     CGNSIntVector bc_range(sb->m_boundaryConditions.size() * 6);
-    size_t                idx = 0;
+    size_t        idx = 0;
     for (const auto &bc : sb->m_boundaryConditions) {
       for (size_t i = 0; i < 3; i++) {
         if (bc.m_rangeBeg[i] == 0) {
@@ -1106,12 +1230,13 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
 
       if (is_parallel_io ||
           (bc_range[idx + 3] > 0 && bc_range[idx + 4] > 0 && bc_range[idx + 5] > 0)) {
-        CGERR(cg_boco_write(file_ptr, base, db_zone, bc.m_bcName.c_str(), CG_FamilySpecified,
-                            CG_PointRange, 2, &bc_range[idx], &bc_idx));
+        CGERR(cg_boco_write(file_ptr, base, db_zone, bc.m_bcName.c_str(),
+                            CGNS_ENUMV(FamilySpecified), CGNS_ENUMV(PointRange), 2, &bc_range[idx],
+                            &bc_idx));
         CGERR(
             cg_goto(file_ptr, base, name.c_str(), 0, "ZoneBC_t", 1, bc.m_bcName.c_str(), 0, "end"));
         CGERR(cg_famname_write(bc.m_famName.c_str()));
-        CGERR(cg_boco_gridlocation_write(file_ptr, base, db_zone, bc_idx, CG_Vertex));
+        CGERR(cg_boco_gridlocation_write(file_ptr, base, db_zone, bc_idx, CGNS_ENUMV(Vertex)));
       }
       idx += 6;
     }
@@ -1124,7 +1249,8 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
     std::set<std::string> zgc_names;
 
     for (const auto &zgc : sb->m_zoneConnectivity) {
-      if (zgc.is_valid() && zgc.is_active()) {
+      if (zgc.is_valid() &&
+          (zgc.is_active() || (!is_parallel && zgc.m_donorProcessor != zgc.m_ownerProcessor))) {
         int                     zgc_idx = 0;
         std::array<cgsize_t, 6> owner_range{{zgc.m_ownerRangeBeg[0], zgc.m_ownerRangeBeg[1],
                                              zgc.m_ownerRangeBeg[2], zgc.m_ownerRangeEnd[0],
@@ -1207,116 +1333,117 @@ size_t Iocgns::Utils::common_write_meta_data(int file_ptr, const Ioss::Region &r
       }
     }
   }
+
   region.get_database()->progress("\tReturn from common_write_meta_data");
   return element_count;
 }
 
-std::string Iocgns::Utils::map_cgns_to_topology_type(CG_ElementType_t type)
+std::string Iocgns::Utils::map_cgns_to_topology_type(CGNS_ENUMT(ElementType_t) type)
 {
   std::string topology = "unknown";
   switch (type) {
-  case CG_NODE: topology = Ioss::Node::name; break;
-  case CG_BAR_2: topology = Ioss::Beam2::name; break;
-  case CG_BAR_3: topology = Ioss::Beam3::name; break;
-  case CG_TRI_3: topology = Ioss::Tri3::name; break;
-  case CG_TRI_6: topology = Ioss::Tri6::name; break;
-  case CG_QUAD_4: topology = Ioss::Quad4::name; break;
-  case CG_QUAD_8: topology = Ioss::Quad8::name; break;
-  case CG_QUAD_9: topology = Ioss::Quad9::name; break;
-  case CG_TETRA_4: topology = Ioss::Tet4::name; break;
-  case CG_TETRA_10: topology = Ioss::Tet10::name; break;
-  case CG_PYRA_5: topology = Ioss::Pyramid5::name; break;
-  case CG_PYRA_13: topology = Ioss::Pyramid13::name; break;
-  case CG_PYRA_14: topology = Ioss::Pyramid14::name; break;
-  case CG_PENTA_6: topology = Ioss::Wedge6::name; break;
-  case CG_PENTA_15: topology = Ioss::Wedge15::name; break;
-  case CG_PENTA_18: topology = Ioss::Wedge18::name; break;
-  case CG_HEXA_8: topology = Ioss::Hex8::name; break;
-  case CG_HEXA_20: topology = Ioss::Hex20::name; break;
-  case CG_HEXA_27: topology = Ioss::Hex27::name; break;
+  case CGNS_ENUMV(NODE): topology = Ioss::Node::name; break;
+  case CGNS_ENUMV(BAR_2): topology = Ioss::Beam2::name; break;
+  case CGNS_ENUMV(BAR_3): topology = Ioss::Beam3::name; break;
+  case CGNS_ENUMV(TRI_3): topology = Ioss::Tri3::name; break;
+  case CGNS_ENUMV(TRI_6): topology = Ioss::Tri6::name; break;
+  case CGNS_ENUMV(QUAD_4): topology = Ioss::Quad4::name; break;
+  case CGNS_ENUMV(QUAD_8): topology = Ioss::Quad8::name; break;
+  case CGNS_ENUMV(QUAD_9): topology = Ioss::Quad9::name; break;
+  case CGNS_ENUMV(TETRA_4): topology = Ioss::Tet4::name; break;
+  case CGNS_ENUMV(TETRA_10): topology = Ioss::Tet10::name; break;
+  case CGNS_ENUMV(PYRA_5): topology = Ioss::Pyramid5::name; break;
+  case CGNS_ENUMV(PYRA_13): topology = Ioss::Pyramid13::name; break;
+  case CGNS_ENUMV(PYRA_14): topology = Ioss::Pyramid14::name; break;
+  case CGNS_ENUMV(PENTA_6): topology = Ioss::Wedge6::name; break;
+  case CGNS_ENUMV(PENTA_15): topology = Ioss::Wedge15::name; break;
+  case CGNS_ENUMV(PENTA_18): topology = Ioss::Wedge18::name; break;
+  case CGNS_ENUMV(HEXA_8): topology = Ioss::Hex8::name; break;
+  case CGNS_ENUMV(HEXA_20): topology = Ioss::Hex20::name; break;
+  case CGNS_ENUMV(HEXA_27): topology = Ioss::Hex27::name; break;
   default:
-    fmt::print(stderr, "WARNING: Found topology of type {} which is not currently supported.\n",
+    fmt::print(Ioss::WARNING(), "Found topology of type {} which is not currently supported.\n",
                cg_ElementTypeName(type));
     topology = Ioss::Unknown::name;
   }
   return topology;
 }
 
-CG_ElementType_t Iocgns::Utils::map_topology_to_cgns(const std::string &name)
+CGNS_ENUMT(ElementType_t) Iocgns::Utils::map_topology_to_cgns(const std::string &name)
 {
-  CG_ElementType_t topo = CG_ElementTypeNull;
+  CGNS_ENUMT(ElementType_t) topo = CGNS_ENUMV(ElementTypeNull);
   if (name == Ioss::Node::name) {
-    topo = CG_NODE;
+    topo = CGNS_ENUMV(NODE);
   }
   else if (name == Ioss::Spring2::name) {
-    topo = CG_BAR_2;
+    topo = CGNS_ENUMV(BAR_2);
   }
   else if (name == Ioss::Spring3::name) {
-    topo = CG_BAR_3;
+    topo = CGNS_ENUMV(BAR_3);
   }
   else if (name == Ioss::Beam2::name) {
-    topo = CG_BAR_2;
+    topo = CGNS_ENUMV(BAR_2);
   }
   else if (name == Ioss::Beam3::name) {
-    topo = CG_BAR_3;
+    topo = CGNS_ENUMV(BAR_3);
   }
   else if (name == Ioss::Tri3::name) {
-    topo = CG_TRI_3;
+    topo = CGNS_ENUMV(TRI_3);
   }
   else if (name == Ioss::Tri6::name) {
-    topo = CG_TRI_6;
+    topo = CGNS_ENUMV(TRI_6);
   }
   else if (name == Ioss::Quad4::name) {
-    topo = CG_QUAD_4;
+    topo = CGNS_ENUMV(QUAD_4);
   }
   else if (name == Ioss::Quad8::name) {
-    topo = CG_QUAD_8;
+    topo = CGNS_ENUMV(QUAD_8);
   }
   else if (name == Ioss::Quad9::name) {
-    topo = CG_QUAD_9;
+    topo = CGNS_ENUMV(QUAD_9);
   }
   else if (name == Ioss::Tet4::name) {
-    topo = CG_TETRA_4;
+    topo = CGNS_ENUMV(TETRA_4);
   }
   else if (name == Ioss::Tet10::name) {
-    topo = CG_TETRA_10;
+    topo = CGNS_ENUMV(TETRA_10);
   }
   else if (name == Ioss::Pyramid5::name) {
-    topo = CG_PYRA_5;
+    topo = CGNS_ENUMV(PYRA_5);
   }
   else if (name == Ioss::Pyramid13::name) {
-    topo = CG_PYRA_13;
+    topo = CGNS_ENUMV(PYRA_13);
   }
   else if (name == Ioss::Pyramid14::name) {
-    topo = CG_PYRA_14;
+    topo = CGNS_ENUMV(PYRA_14);
   }
   else if (name == Ioss::Wedge6::name) {
-    topo = CG_PENTA_6;
+    topo = CGNS_ENUMV(PENTA_6);
   }
   else if (name == Ioss::Wedge15::name) {
-    topo = CG_PENTA_15;
+    topo = CGNS_ENUMV(PENTA_15);
   }
   else if (name == Ioss::Wedge18::name) {
-    topo = CG_PENTA_18;
+    topo = CGNS_ENUMV(PENTA_18);
   }
   else if (name == Ioss::Hex8::name) {
-    topo = CG_HEXA_8;
+    topo = CGNS_ENUMV(HEXA_8);
   }
   else if (name == Ioss::Hex20::name) {
-    topo = CG_HEXA_20;
+    topo = CGNS_ENUMV(HEXA_20);
   }
   else if (name == Ioss::Hex27::name) {
-    topo = CG_HEXA_27;
+    topo = CGNS_ENUMV(HEXA_27);
   }
   else {
-    fmt::print(stderr, "WARNING: Found topology of type {} which is not currently supported.\n",
+    fmt::print(Ioss::WARNING(), "Found topology of type {} which is not currently supported.\n",
                name);
   }
   return topo;
 }
 
-void Iocgns::Utils::write_flow_solution_metadata(int file_ptr, Ioss::Region *region, int state,
-                                                 const int *vertex_solution_index,
+void Iocgns::Utils::write_flow_solution_metadata(int file_ptr, int base_ptr, Ioss::Region *region,
+                                                 int state, const int *vertex_solution_index,
                                                  const int *cell_center_solution_index,
                                                  bool       is_parallel_io)
 {
@@ -1327,6 +1454,16 @@ void Iocgns::Utils::write_flow_solution_metadata(int file_ptr, Ioss::Region *reg
   const auto &nblocks                 = region->get_node_blocks();
   const auto &nblock                  = nblocks[0];
   bool        global_has_nodal_fields = nblock->field_count(Ioss::Field::TRANSIENT) > 0;
+  bool        is_file_per_state       = (base_ptr >= 0);
+
+  // IF the `base_ptr` is positive, then we are in file-per-state option.
+  // `file_ptr` points to the linked-to file where the state data is being
+  // written and `base_ptr` points to the "base" file which has the mesh
+  // metadata and links to the solution data "state" files.
+  std::string linked_file_name;
+  if (is_file_per_state) {
+    linked_file_name = region->get_database()->get_filename();
+  }
 
   // Create a lambda to avoid code duplication for similar treatment
   // of structured blocks and element blocks.
@@ -1334,15 +1471,29 @@ void Iocgns::Utils::write_flow_solution_metadata(int file_ptr, Ioss::Region *reg
     int base = block->get_property("base").get_int();
     int zone = get_db_zone(block);
     if (has_nodal_fields) {
-      CGERR(cg_sol_write(file_ptr, base, zone, v_name.c_str(), CG_Vertex,
+      if (is_file_per_state) {
+        // We are using file-per-state and we need to add a link from the base file (base_ptr)
+        // to the state file (file_ptr).
+        CGERR(cg_goto(base_ptr, base, "Zone_t", zone, "end"));
+        std::string linkpath = "/Base/" + block->name() + "/" + v_name;
+        CGERR(cg_link_write(v_name.c_str(), linked_file_name.c_str(), linkpath.c_str()));
+      }
+      CGERR(cg_sol_write(file_ptr, base, zone, v_name.c_str(), CGNS_ENUMV(Vertex),
                          (int *)vertex_solution_index));
       CGERR(
           cg_goto(file_ptr, base, "Zone_t", zone, "FlowSolution_t", *vertex_solution_index, "end"));
-      CGERR(cg_gridlocation_write(CG_Vertex));
+      CGERR(cg_gridlocation_write(CGNS_ENUMV(Vertex)));
       CGERR(cg_descriptor_write("Step", step.c_str()));
     }
     if (block->field_count(Ioss::Field::TRANSIENT) > 0) {
-      CGERR(cg_sol_write(file_ptr, base, zone, c_name.c_str(), CG_CellCenter,
+      if (is_file_per_state) {
+        // We are using file-per-state and we need to add a link from the base file (base_ptr)
+        // to the state file (file_ptr).
+        CGERR(cg_goto(base_ptr, base, "Zone_t", zone, "end"));
+        std::string linkpath = "/Base/" + block->name() + "/" + c_name;
+        CGERR(cg_link_write(c_name.c_str(), linked_file_name.c_str(), linkpath.c_str()));
+      }
+      CGERR(cg_sol_write(file_ptr, base, zone, c_name.c_str(), CGNS_ENUMV(CellCenter),
                          (int *)cell_center_solution_index));
       CGERR(cg_goto(file_ptr, base, "Zone_t", zone, "FlowSolution_t", *cell_center_solution_index,
                     "end"));
@@ -1367,15 +1518,15 @@ void Iocgns::Utils::write_flow_solution_metadata(int file_ptr, Ioss::Region *reg
 }
 
 int Iocgns::Utils::find_solution_index(int cgns_file_ptr, int base, int zone, int step,
-                                       CG_GridLocation_t location)
+                                       CGNS_ENUMT(GridLocation_t) location)
 {
   auto str_step = std::to_string(step);
   int  nsols    = 0;
   CGCHECKNP(cg_nsols(cgns_file_ptr, base, zone, &nsols));
   bool location_matches = false;
   for (int i = 0; i < nsols; i++) {
-    CG_GridLocation_t db_location;
-    char              db_name[CGNS_MAX_NAME_LENGTH + 1];
+    CGNS_ENUMT(GridLocation_t) db_location;
+    char db_name[CGNS_MAX_NAME_LENGTH + 1];
     CGCHECKNP(cg_sol_info(cgns_file_ptr, base, zone, i + 1, db_name, &db_location));
     if (location == db_location) {
       location_matches = true;
@@ -1407,7 +1558,7 @@ int Iocgns::Utils::find_solution_index(int cgns_file_ptr, int base, int zone, in
         // Try to decode the step from the FlowSolution_t name.
         // If `db_name` does not have `Step` or `step` in name,
         // then don't search
-        if (strcasestr(db_name, "step") != NULL) {
+        if (strcasestr(db_name, "step") != nullptr) {
           int nstep = extract_trailing_int(db_name);
           if (nstep == step) {
             return i + 1;
@@ -1421,10 +1572,9 @@ int Iocgns::Utils::find_solution_index(int cgns_file_ptr, int base, int zone, in
     return step;
   }
 
-  fmt::print(
-      stderr,
-      "WARNING: CGNS: Could not find valid solution index for step {}, zone {}, and location {}\n",
-      step, zone, GridLocationName[location]);
+  fmt::print(Ioss::WARNING(),
+             "CGNS: Could not find valid solution index for step {}, zone {}, and location {}\n",
+             step, zone, cg_GridLocationName(location));
   return 0;
 }
 
@@ -1435,16 +1585,16 @@ void Iocgns::Utils::add_sidesets(int cgns_file_ptr, Ioss::DatabaseIO *db)
   CGCHECKNP(cg_nfamilies(cgns_file_ptr, base, &num_families));
 
   for (int family = 1; family <= num_families; family++) {
-    char        name[CGNS_MAX_NAME_LENGTH + 1];
-    CG_BCType_t bocotype;
-    int         num_bc  = 0;
-    int         num_geo = 0;
+    char name[CGNS_MAX_NAME_LENGTH + 1];
+    CGNS_ENUMT(BCType_t) bocotype;
+    int num_bc  = 0;
+    int num_geo = 0;
     CGCHECKNP(cg_family_read(cgns_file_ptr, base, family, name, &num_bc, &num_geo));
 
 #if IOSS_DEBUG_OUTPUT
     if (db->parallel_rank() == 0) {
-      fmt::print(stderr, "Family {} named {} has {} BC, and {} geometry references.\n", family,
-                 name, num_bc, num_geo);
+      fmt::print(Ioss::DEBUG(), "Family {} named {} has {} BC, and {} geometry references.\n",
+                 family, name, num_bc, num_geo);
     }
 #endif
     if (num_bc > 0) {
@@ -1483,10 +1633,66 @@ void Iocgns::Utils::add_sidesets(int cgns_file_ptr, Ioss::DatabaseIO *db)
       }
       else {
         if (db->parallel_rank() == 0) {
-          fmt::print(
-              IOSS_WARNING,
-              "*** WARNING: Skipping BC with name '{}' since FamBC_UserId is equal to 0.\n\n",
-              ss_name);
+          fmt::print(Ioss::WARNING(),
+                     "Skipping BC with name '{}' since FamBC_UserId is equal to 0.\n\n", ss_name);
+        }
+      }
+    }
+  }
+}
+
+void Iocgns::Utils::add_assemblies(int cgns_file_ptr, Ioss::DatabaseIO *db)
+{
+  int base         = 1;
+  int num_families = 0;
+  CGCHECKNP(cg_nfamilies(cgns_file_ptr, base, &num_families));
+
+  for (int family = 1; family <= num_families; family++) {
+    char name[CGNS_MAX_NAME_LENGTH + 1];
+    int  num_bc  = 0;
+    int  num_geo = 0;
+    CGCHECKNP(cg_family_read(cgns_file_ptr, base, family, name, &num_bc, &num_geo));
+
+    if (num_bc == 0 && num_geo == 0) {
+      // See if this is an assembly -- will contain a 'FamVC_UserName' Descriptor_t node
+      // The `Node Data` for that node will be the name of the assembly.
+      // Assemblies will be created empty and then blocks/zones will be added during
+      // the parsing of the zones.
+      CGCHECKNP(cg_goto(cgns_file_ptr, base, "Family_t", family, "end"));
+
+      int ndescriptors = 0;
+      CGCHECKNP(cg_ndescriptors(&ndescriptors));
+      if (ndescriptors > 0) {
+        int         id = -1;
+        std::string assem_name;
+        for (int ndesc = 1; ndesc <= ndescriptors; ndesc++) {
+          char  dname[CGNS_MAX_NAME_LENGTH + 1];
+          char *dtext = nullptr;
+          CGCHECKNP(cg_descriptor_read(ndesc, dname, &dtext));
+          if (strcmp(dname, "FamVC_UserId") == 0) {
+            // Convert text in `dtext` to integer...
+            id = Ioss::Utils::get_number(dtext);
+          }
+          else if (strcmp(dname, "FamVC_UserName") == 0) {
+            assem_name = dtext;
+          }
+          cg_free(dtext);
+        }
+        if (!assem_name.empty()) {
+          // Create an assembly with this name...
+          auto *assem = new Ioss::Assembly(db, assem_name);
+          db->get_region()->add(assem);
+          if (id >= 0) {
+            assem->property_add(Ioss::Property("id", id));
+          }
+
+#if IOSS_DEBUG_OUTPUT
+          if (db->parallel_rank() == 0) {
+            fmt::print(Ioss::DEBUG(),
+                       "Adding Family {} named {} as an assembly named {} with id {}.\n", family,
+                       name, assem_name, id);
+          }
+#endif
         }
       }
     }
@@ -1511,14 +1717,14 @@ size_t Iocgns::Utils::resolve_nodes(Ioss::Region &region, int my_processor, bool
 
   // Create a vector of size which is the sum of the on-processor cell_nodes size for each block
   size_t num_total_cell_nodes = 0;
-  auto & blocks               = region.get_structured_blocks();
+  auto  &blocks               = region.get_structured_blocks();
   for (auto &block : blocks) {
     size_t node_count = block->get_property("node_count").get_int();
     num_total_cell_nodes += node_count;
   }
 
-  ssize_t              ss_max = std::numeric_limits<ssize_t>::max();
-  std::vector<ssize_t> cell_node_map(num_total_cell_nodes, ss_max);
+  int64_t              ss_max = std::numeric_limits<int64_t>::max();
+  std::vector<int64_t> cell_node_map(num_total_cell_nodes, ss_max);
 
   // Each cell_node location in the cell_node_map is currently initialized to ss_max.
   // Iterate each block and then each blocks non-intra-block (i.e., not
@@ -1549,8 +1755,8 @@ size_t Iocgns::Utils::resolve_nodes(Ioss::Region &region, int my_processor, bool
               // the owner (unless it is already owned by another
               // block)
 
-              ssize_t owner_global_offset = owner_block->get_global_node_offset(owner_index);
-              ssize_t donor_global_offset = donor_block->get_global_node_offset(donor_index);
+              int64_t owner_global_offset = owner_block->get_global_node_offset(owner_index);
+              int64_t donor_global_offset = donor_block->get_global_node_offset(donor_index);
 
               if (owner_global_offset > donor_global_offset) {
                 if (is_parallel && (zgc.m_donorProcessor != my_processor)) {
@@ -1561,7 +1767,7 @@ size_t Iocgns::Utils::resolve_nodes(Ioss::Region &region, int my_processor, bool
                 }
                 else if (!is_parallel || (zgc.m_ownerProcessor != my_processor)) {
                   size_t  owner_local_offset = owner_block->get_local_node_offset(owner_index);
-                  ssize_t donor_local_offset = donor_block->get_local_node_offset(donor_index);
+                  int64_t donor_local_offset = donor_block->get_local_node_offset(donor_index);
 
                   if (cell_node_map[owner_local_offset] == ss_max) {
                     cell_node_map[owner_local_offset] = donor_local_offset;
@@ -1654,11 +1860,11 @@ Iocgns::Utils::resolve_processor_shared_nodes(Ioss::Region &region, int my_proce
               // should refer to the same node.
 
               if (my_processor == zgc.m_ownerProcessor) {
-                ssize_t owner_offset = owner_block->get_block_local_node_offset(owner_index);
+                int64_t owner_offset = owner_block->get_block_local_node_offset(owner_index);
                 shared_nodes[owner_zone].emplace_back(owner_offset, zgc.m_donorProcessor);
               }
               else if (my_processor == zgc.m_donorProcessor) {
-                ssize_t donor_offset = donor_block->get_block_local_node_offset(donor_index);
+                int64_t donor_offset = donor_block->get_block_local_node_offset(donor_index);
                 shared_nodes[donor_zone].emplace_back(donor_offset, zgc.m_ownerProcessor);
               }
             }
@@ -1667,11 +1873,27 @@ Iocgns::Utils::resolve_processor_shared_nodes(Ioss::Region &region, int my_proce
       }
     }
 #if IOSS_DEBUG_OUTPUT
-    fmt::print(stderr, "P{}, Block {} Shared Nodes: {}\n", my_processor, owner_block->name(),
+    fmt::print(Ioss::DEBUG(), "P{}, Block {} Shared Nodes: {}\n", my_processor, owner_block->name(),
                shared_nodes[owner_zone].size());
 #endif
   }
   return shared_nodes;
+}
+
+void Iocgns::Utils::add_to_assembly(int cgns_file_ptr, Ioss::Region *region,
+                                    Ioss::EntityBlock *block, int base, int zone)
+{
+  // See if there is a 'FamilyName' node...
+  if (cg_goto(cgns_file_ptr, base, "Zone_t", zone, "end") == CG_OK) {
+    char name[CGNS_MAX_NAME_LENGTH + 1];
+    if (cg_famname_read(name) == CG_OK) {
+      auto *assem = region->get_assembly(name);
+      if (assem != nullptr) {
+        assem->add(block);
+        block->property_add(Ioss::Property("assembly", assem->name()));
+      }
+    }
+  }
 }
 
 void Iocgns::Utils::add_structured_boundary_conditions(int                    cgns_file_ptr,
@@ -1708,21 +1930,21 @@ void Iocgns::Utils::add_structured_boundary_conditions_pio(int                  
   std::vector<char> bc_names(2 * (CGNS_MAX_NAME_LENGTH + 1) * num_bcs);
 
   for (int ibc = 0; ibc < num_bcs; ibc++) {
-    cgsize_t          range[6];
-    char              boco_name[CGNS_MAX_NAME_LENGTH + 1];
-    char              fam_name[CGNS_MAX_NAME_LENGTH + 1];
-    CG_BCType_t       bocotype;
-    CG_PointSetType_t ptset_type;
-    cgsize_t          npnts;
-    cgsize_t          NormalListSize;
-    CG_DataType_t     NormalDataType;
-    int               ndataset;
+    cgsize_t range[6];
+    char     boco_name[CGNS_MAX_NAME_LENGTH + 1];
+    char     fam_name[CGNS_MAX_NAME_LENGTH + 1];
+    CGNS_ENUMT(BCType_t) bocotype;
+    CGNS_ENUMT(PointSetType_t) ptset_type;
+    cgsize_t npnts;
+    cgsize_t NormalListSize;
+    CGNS_ENUMT(DataType_t) NormalDataType;
+    int ndataset;
 
     // All we really want from this is 'boco_name'
     CGCHECKNP(cg_boco_info(cgns_file_ptr, base, zone, ibc + 1, boco_name, &bocotype, &ptset_type,
                            &npnts, nullptr, &NormalListSize, &NormalDataType, &ndataset));
 
-    if (bocotype == CG_FamilySpecified) {
+    if (bocotype == CGNS_ENUMV(FamilySpecified)) {
       // Get family name associated with this boco_name
       CGCHECKNP(
           cg_goto(cgns_file_ptr, base, "Zone_t", zone, "ZoneBC_t", 1, "BC_t", ibc + 1, "end"));
@@ -1740,11 +1962,10 @@ void Iocgns::Utils::add_structured_boundary_conditions_pio(int                  
       int same_count = (range[0] == range[3] ? 1 : 0) + (range[1] == range[4] ? 1 : 0) +
                        (range[2] == range[5] ? 1 : 0);
       if (same_count != 1) {
-        fmt::print(
-            stderr,
-            "WARNING: CGNS: Skipping Boundary Condition '{}' on block '{}'. It is applied to "
-            "{}. This code only supports surfaces.\n",
-            boco_name, block->name(), (same_count == 2 ? "an edge" : "a vertex"));
+        fmt::print(Ioss::WARNING(),
+                   "CGNS: Skipping Boundary Condition '{}' on block '{}'. It is applied to "
+                   "{}. This code only supports surfaces.\n",
+                   boco_name, block->name(), (same_count == 2 ? "an edge" : "a vertex"));
         continue;
       }
     }
@@ -1767,10 +1988,10 @@ void Iocgns::Utils::generate_boundary_faces(
     face_generator.generate_faces((int64_t)0, true);
   }
   const Ioss::ElementBlockContainer &ebs = region->get_element_blocks();
-  for (auto eb : ebs) {
+  for (auto &eb : ebs) {
     const std::string &name     = eb->name();
-    auto &             boundary = boundary_faces[name];
-    auto &             faces    = face_generator.faces(name);
+    auto              &boundary = boundary_faces[name];
+    auto              &faces    = face_generator.faces(name);
     for (auto &face : faces) {
       if (face.elementCount_ == 1) {
         boundary.insert(face);
@@ -1795,21 +2016,21 @@ void Iocgns::Utils::add_structured_boundary_conditions_fpp(int                  
   CGCHECKNP(cg_nbocos(cgns_file_ptr, base, zone, &num_bcs));
 
   for (int ibc = 0; ibc < num_bcs; ibc++) {
-    char              boco_name[CGNS_MAX_NAME_LENGTH + 1];
-    char              fam_name[CGNS_MAX_NAME_LENGTH + 1];
-    CG_BCType_t       bocotype;
-    CG_PointSetType_t ptset_type;
-    cgsize_t          npnts;
-    cgsize_t          NormalListSize;
-    CG_DataType_t     NormalDataType;
-    int               ndataset;
-    cgsize_t          range[6];
+    char boco_name[CGNS_MAX_NAME_LENGTH + 1];
+    char fam_name[CGNS_MAX_NAME_LENGTH + 1];
+    CGNS_ENUMT(BCType_t) bocotype;
+    CGNS_ENUMT(PointSetType_t) ptset_type;
+    cgsize_t npnts;
+    cgsize_t NormalListSize;
+    CGNS_ENUMT(DataType_t) NormalDataType;
+    int      ndataset;
+    cgsize_t range[6];
 
     // All we really want from this is 'boco_name'
     CGCHECKNP(cg_boco_info(cgns_file_ptr, base, zone, ibc + 1, boco_name, &bocotype, &ptset_type,
                            &npnts, nullptr, &NormalListSize, &NormalDataType, &ndataset));
 
-    if (bocotype == CG_FamilySpecified) {
+    if (bocotype == CGNS_ENUMV(FamilySpecified)) {
       // Get family name associated with this boco_name
       CGCHECKNP(
           cg_goto(cgns_file_ptr, base, "Zone_t", zone, "ZoneBC_t", 1, "BC_t", ibc + 1, "end"));
@@ -1826,8 +2047,8 @@ void Iocgns::Utils::add_structured_boundary_conditions_fpp(int                  
     int same_count = (range[0] == range[3] ? 1 : 0) + (range[1] == range[4] ? 1 : 0) +
                      (range[2] == range[5] ? 1 : 0);
     if (same_count != 1) {
-      fmt::print(stderr,
-                 "WARNING: CGNS: Skipping Boundary Condition '{}' on block '{}'. It is applied to "
+      fmt::print(Ioss::WARNING(),
+                 "CGNS: Skipping Boundary Condition '{}' on block '{}'. It is applied to "
                  "{}. This code only supports surfaces.\n",
                  boco_name, block->name(), (same_count == 2 ? "an edge" : "a vertex"));
       continue;
@@ -1862,12 +2083,12 @@ void Iocgns::Utils::finalize_database(int cgns_file_ptr, const std::vector<doubl
   // Now write the timestep time values...
   CGCHECK(cg_goto(cgns_file_ptr, base, "BaseIterativeData_t", 1, "end"));
   cgsize_t dimtv[1] = {(cgsize_t)timesteps.size()};
-  CGCHECK(cg_array_write("TimeValues", CG_RealDouble, 1, dimtv, timesteps.data()));
+  CGCHECK(cg_array_write("TimeValues", CGNS_ENUMV(RealDouble), 1, dimtv, timesteps.data()));
 
   // Output the ZoneIterativeData which maps a zones flow solutions to timesteps.
   // One per zone and the number of entries matches the number of timesteps...
   const auto &nblocks = region->get_node_blocks();
-  auto &      nblock  = nblocks[0];
+  auto       &nblock  = nblocks[0];
 
   bool has_nodal_fields = nblock->field_count(Ioss::Field::TRANSIENT) > 0;
 
@@ -1902,7 +2123,7 @@ void Iocgns::Utils::finalize_database(int cgns_file_ptr, const std::vector<doubl
     if (has_cell_center_fields || has_nodal_fields) {
       CGCHECK(cg_ziter_write(cgns_file_ptr, base, zone, "ZoneIterativeData"));
       CGCHECK(cg_goto(cgns_file_ptr, base, "Zone_t", zone, "ZoneIterativeData_t", 1, "end"));
-      CGCHECK(cg_array_write("FlowSolutionPointers", CG_Character, 2, dim, names.data()));
+      CGCHECK(cg_array_write("FlowSolutionPointers", CGNS_ENUMV(Character), 2, dim, names.data()));
 
       if (has_nodal_fields) {
         int index     = 1;
@@ -1912,7 +2133,8 @@ void Iocgns::Utils::finalize_database(int cgns_file_ptr, const std::vector<doubl
           index += increment;
         }
 
-        CGCHECK(cg_array_write("VertexSolutionIndices", CG_Integer, 1, &dim[1], indices.data()));
+        CGCHECK(cg_array_write("VertexSolutionIndices", CGNS_ENUMV(Integer), 1, &dim[1],
+                               indices.data()));
         CGCHECK(cg_descriptor_write("VertexPrefix", "Vertex"));
       }
       if (has_cell_center_fields) {
@@ -1923,7 +2145,8 @@ void Iocgns::Utils::finalize_database(int cgns_file_ptr, const std::vector<doubl
           index += increment;
         }
 
-        CGCHECK(cg_array_write("CellCenterIndices", CG_Integer, 1, &dim[1], indices.data()));
+        CGCHECK(
+            cg_array_write("CellCenterIndices", CGNS_ENUMV(Integer), 1, &dim[1], indices.data()));
         CGCHECK(cg_descriptor_write("CellCenterPrefix", "CellCenter"));
       }
     }
@@ -1945,8 +2168,7 @@ void Iocgns::Utils::finalize_database(int cgns_file_ptr, const std::vector<doubl
 }
 
 void Iocgns::Utils::add_transient_variables(int cgns_file_ptr, const std::vector<double> &timesteps,
-                                            Ioss::Region *region, bool enable_field_recognition,
-                                            char suffix_separator, int myProcessor,
+                                            Ioss::Region *region, int myProcessor,
                                             bool is_parallel_io)
 {
   // ==========================================
@@ -1966,8 +2188,8 @@ void Iocgns::Utils::add_transient_variables(int cgns_file_ptr, const std::vector
     assert(sol_count % (int)timesteps.size() == 0);
 
     for (int sol = 1; sol <= sol_per_step; sol++) {
-      char              solution_name[CGNS_MAX_NAME_LENGTH + 1];
-      CG_GridLocation_t grid_loc;
+      char solution_name[CGNS_MAX_NAME_LENGTH + 1];
+      CGNS_ENUMT(GridLocation_t) grid_loc;
       CGCHECK(cg_sol_info(cgns_file_ptr, b, z, sol, solution_name, &grid_loc));
 
       int field_count = 0;
@@ -1975,18 +2197,18 @@ void Iocgns::Utils::add_transient_variables(int cgns_file_ptr, const std::vector
 
       char **field_names = Ioss::Utils::get_name_array(field_count, CGNS_MAX_NAME_LENGTH);
       for (int field = 1; field <= field_count; field++) {
-        CG_DataType_t data_type;
-        char          field_name[CGNS_MAX_NAME_LENGTH + 1];
+        CGNS_ENUMT(DataType_t) data_type;
+        char field_name[CGNS_MAX_NAME_LENGTH + 1];
         CGCHECK(cg_field_info(cgns_file_ptr, b, z, sol, field, &data_type, field_name));
         Ioss::Utils::copy_string(field_names[field - 1], field_name, CGNS_MAX_NAME_LENGTH + 1);
       }
 
       // Convert raw field names into composite fields (a_x, a_y, a_z ==> 3D vector 'a')
       std::vector<Ioss::Field> fields;
-      if (grid_loc == CG_CellCenter) {
+      if (grid_loc == CGNS_ENUMV(CellCenter)) {
         size_t entity_count = block->entity_count();
         Ioss::Utils::get_fields(entity_count, field_names, field_count, Ioss::Field::TRANSIENT,
-                                enable_field_recognition, suffix_separator, nullptr, fields);
+                                region->get_database(), nullptr, fields);
         size_t index = 1;
         for (const auto &field : fields) {
           Utils::set_field_index(field, index, grid_loc);
@@ -1995,15 +2217,15 @@ void Iocgns::Utils::add_transient_variables(int cgns_file_ptr, const std::vector
         }
       }
       else {
-        assert(grid_loc == CG_Vertex);
+        assert(grid_loc == CGNS_ENUMV(Vertex));
         const Ioss::NodeBlock *cnb =
             (block->type() == Ioss::STRUCTUREDBLOCK)
                 ? &(dynamic_cast<Ioss::StructuredBlock *>(block)->get_node_block())
                 : region->get_node_blocks()[0];
-        auto * nb           = const_cast<Ioss::NodeBlock *>(cnb);
+        auto  *nb           = const_cast<Ioss::NodeBlock *>(cnb);
         size_t entity_count = nb->entity_count();
         Ioss::Utils::get_fields(entity_count, field_names, field_count, Ioss::Field::TRANSIENT,
-                                enable_field_recognition, suffix_separator, nullptr, fields);
+                                region->get_database(), nullptr, fields);
         size_t index = 1;
         for (const auto &field : fields) {
           Utils::set_field_index(field, index, grid_loc);
@@ -2056,7 +2278,7 @@ int Iocgns::Utils::get_step_times(int cgns_file_ptr, std::vector<double> &timest
   // Read the timestep time values.
   CGCHECK(cg_goto(cgns_file_ptr, base, "BaseIterativeData_t", 1, "end"));
   std::vector<double> times(num_timesteps);
-  CGCHECK(cg_array_read_as(1, CG_RealDouble, times.data()));
+  CGCHECK(cg_array_read_as(1, CGNS_ENUMV(RealDouble), times.data()));
 
   timesteps.reserve(num_timesteps);
   for (int i = 0; i < num_timesteps; i++) {
@@ -2093,7 +2315,7 @@ void Iocgns::Utils::set_line_decomposition(int cgns_file_ptr, const std::string 
     CGCHECKNP(cg_family_read(cgns_file_ptr, base, family, name, &num_bc, &num_geo));
     if (num_bc > 0) {
       Ioss::Utils::fixup_name(name);
-      families.push_back(name);
+      families.emplace_back(name);
     }
   }
 
@@ -2115,7 +2337,7 @@ void Iocgns::Utils::set_line_decomposition(int cgns_file_ptr, const std::string 
     }
   }
 
-  for (auto zone : zones) {
+  for (auto &zone : zones) {
     // Read BCs applied to this zone and see if they match any of
     // the BCs in 'bcs' list.  If so, determine the face the BC is
     // applied to and set the m_lineOrdinal to the ordinal
@@ -2125,19 +2347,19 @@ void Iocgns::Utils::set_line_decomposition(int cgns_file_ptr, const std::string 
     CGCHECKNP(cg_nbocos(cgns_file_ptr, base, izone, &num_bcs));
 
     for (int ibc = 0; ibc < num_bcs; ibc++) {
-      char              boconame[CGNS_MAX_NAME_LENGTH + 1];
-      CG_BCType_t       bocotype;
-      CG_PointSetType_t ptset_type;
-      cgsize_t          npnts;
-      cgsize_t          NormalListSize;
-      CG_DataType_t     NormalDataType;
-      int               ndataset;
+      char boconame[CGNS_MAX_NAME_LENGTH + 1];
+      CGNS_ENUMT(BCType_t) bocotype;
+      CGNS_ENUMT(PointSetType_t) ptset_type;
+      cgsize_t npnts;
+      cgsize_t NormalListSize;
+      CGNS_ENUMT(DataType_t) NormalDataType;
+      int ndataset;
 
       // All we really want from this is 'boconame'
       CGCHECKNP(cg_boco_info(cgns_file_ptr, base, izone, ibc + 1, boconame, &bocotype, &ptset_type,
                              &npnts, nullptr, &NormalListSize, &NormalDataType, &ndataset));
 
-      if (bocotype == CG_FamilySpecified) {
+      if (bocotype == CGNS_ENUMV(FamilySpecified)) {
         // Need to get boconame from cg_famname_read
         CGCHECKNP(
             cg_goto(cgns_file_ptr, base, "Zone_t", izone, "ZoneBC_t", 1, "BC_t", ibc + 1, "end"));
@@ -2158,29 +2380,20 @@ void Iocgns::Utils::set_line_decomposition(int cgns_file_ptr, const std::string 
         int sum = (i ? 1 : 0) + (j ? 1 : 0) + (k ? 1 : 0);
         // Only set m_lineOrdinal if only a single ordinal selected.
         if (sum == 1) {
-          int ordinal = -1;
+          unsigned int ordinal = 0;
           if (i) {
-            ordinal = 0;
+            ordinal = Ordinal::I;
           }
           else if (j) {
-            ordinal = 1;
+            ordinal = Ordinal::J;
           }
           else if (k) {
-            ordinal = 2;
+            ordinal = Ordinal::K;
           }
-          if (zone->m_lineOrdinal == -1) {
-            zone->m_lineOrdinal = ordinal;
-            if (verbose && rank == 0) {
-              fmt::print(stderr, "Setting line ordinal to {} on {} for surface: {}\n",
-                         zone->m_lineOrdinal, zone->m_name, boconame);
-            }
-          }
-          else if (zone->m_lineOrdinal != ordinal && rank == 0) {
-            fmt::print(
-                IOSS_WARNING,
-                "CGNS: Zone {0} named {1} has multiple line decomposition ordinal "
-                "specifications. Both ordinal {2} and {3} have been specified.  Keeping {3}\n",
-                izone, zone->m_name, ordinal, zone->m_lineOrdinal);
+          zone->m_lineOrdinal |= ordinal;
+          if (verbose && rank == 0) {
+            fmt::print(Ioss::DEBUG(), "Setting line ordinal to {} on {} for surface: {}\n",
+                       zone->m_lineOrdinal, zone->m_name, boconame);
           }
         }
       }
@@ -2204,38 +2417,38 @@ void Iocgns::Utils::decompose_model(std::vector<Iocgns::StructuredZoneData *> &z
     auto num_active = zones.size();
     if (rank == 0) {
       fmt::print(
-          stderr,
-          "Decomposing structured mesh with {} zones for {} processors.\nAverage workload is {:n}, "
-          "Load Balance Threshold is {}, Work range {:n} to {:n}\n",
-          num_active, proc_count, (size_t)avg_work, load_balance_threshold,
-          (size_t)(avg_work / load_balance_threshold), (size_t)(avg_work * load_balance_threshold));
+          Ioss::OUTPUT(),
+          "Decomposing structured mesh with {} zones for {} processors.\nAverage workload is {}, "
+          "Load Balance Threshold is {}, Work range {} to {}\n",
+          num_active, proc_count, fmt::group_digits((size_t)avg_work), load_balance_threshold,
+          fmt::group_digits((size_t)(avg_work / load_balance_threshold)),
+          fmt::group_digits((size_t)(avg_work * load_balance_threshold)));
     }
   }
 
   if (avg_work < 1.0) {
-    if (rank == 0) {
-      fmt::print(stderr, "ERROR: Model size too small to distribute over {} processors.\n",
-                 proc_count);
-    }
-    std::exit(EXIT_FAILURE);
+    std::ostringstream errmsg;
+    fmt::print(errmsg, "ERROR: Model size too small to distribute over {} processors.\n",
+               proc_count);
+    IOSS_ERROR(errmsg);
   }
 
   if (verbose) {
     if (rank == 0) {
-      fmt::print(stderr,
+      fmt::print(Ioss::DEBUG(),
                  "========================================================================\n");
-      fmt::print(stderr, "Pre-Splitting: (Average = {:n}, LB Threshold = {}\n", (size_t)avg_work,
-                 load_balance_threshold);
+      fmt::print(Ioss::DEBUG(), "Pre-Splitting: (Average = {}, LB Threshold = {}\n",
+                 fmt::group_digits((size_t)avg_work), load_balance_threshold);
     }
   }
   // Split all blocks where block->work() > avg_work * load_balance_threshold
-  size_t new_zone_id =
+  int new_zone_id =
       Utils::pre_split(zones, avg_work, load_balance_threshold, rank, proc_count, verbose);
 
   // At this point, there should be no zone with block->work() > avg_work * load_balance_threshold
   if (verbose) {
     if (rank == 0) {
-      fmt::print(stderr,
+      fmt::print(Ioss::DEBUG(),
                  "========================================================================\n");
     }
   }
@@ -2254,20 +2467,21 @@ void Iocgns::Utils::decompose_model(std::vector<Iocgns::StructuredZoneData *> &z
         exceeds[i] = true;
         px++;
         if (verbose && rank == 0) {
-          fmt::print(stderr, fg(fmt::color::red),
-                     "\nProcessor {} work: {:n}, workload ratio: {} (exceeds)", i, work_vector[i],
-                     workload_ratio);
+          fmt::print(Ioss::DEBUG(), "{}",
+                     fmt::format(fg(fmt::color::red),
+                                 "\nProcessor {} work: {}, workload ratio: {} (exceeds)", i,
+                                 fmt::group_digits(work_vector[i]), workload_ratio));
         }
       }
       else {
         if (verbose && rank == 0) {
-          fmt::print(stderr, "\nProcessor {} work: {:n}, workload ratio: {}", i, work_vector[i],
-                     workload_ratio);
+          fmt::print(Ioss::DEBUG(), "\nProcessor {} work: {}, workload ratio: {}", i,
+                     fmt::group_digits(work_vector[i]), workload_ratio);
         }
       }
     }
     if (verbose && rank == 0) {
-      fmt::print(stderr, "\n\nWorkload threshold exceeded on {} processors.\n", px);
+      fmt::print(Ioss::DEBUG(), "\n\nWorkload threshold exceeded on {} processors.\n", px);
     }
     bool single_zone = zones.size() == 1;
     if (single_zone) {
@@ -2280,7 +2494,7 @@ void Iocgns::Utils::decompose_model(std::vector<Iocgns::StructuredZoneData *> &z
     num_split = 0;
     if (px > 0) {
       auto zone_new(zones);
-      for (auto zone : zones) {
+      for (auto &zone : zones) {
         if (zone->is_active() && exceeds[zone->m_proc]) {
           // Since 'zones' is sorted from most work to least,
           // we just iterate zones and check whether the zone
@@ -2307,9 +2521,9 @@ void Iocgns::Utils::decompose_model(std::vector<Iocgns::StructuredZoneData *> &z
       auto active = std::count_if(zones.begin(), zones.end(),
                                   [](Iocgns::StructuredZoneData *a) { return a->is_active(); });
       if (rank == 0) {
-        fmt::print(stderr, "Number of active zones = {}, average work = {:n}\n", active,
-                   (size_t)avg_work);
-        fmt::print(stderr,
+        fmt::print(Ioss::DEBUG(), "Number of active zones = {}, average work = {}\n", active,
+                   fmt::group_digits((size_t)avg_work));
+        fmt::print(Ioss::DEBUG(),
                    "========================================================================\n");
       }
     }
@@ -2328,26 +2542,34 @@ void Iocgns::Utils::assign_zones_to_procs(std::vector<Iocgns::StructuredZoneData
   std::copy_if(all_zones.begin(), all_zones.end(), std::back_inserter(zones),
                [](Iocgns::StructuredZoneData *z) { return z->is_active(); });
 
-  std::sort(zones.begin(), zones.end(),
-            [](Iocgns::StructuredZoneData *a, Iocgns::StructuredZoneData *b) {
-              return a->work() > b->work();
-            });
+  Ioss::sort(zones.begin(), zones.end(),
+             [](Iocgns::StructuredZoneData *a, Iocgns::StructuredZoneData *b) {
+               return a->work() > b->work();
+             });
 
   std::set<std::pair<int, int>> proc_adam_map;
 
   // On first entry, work_vector will be all zeros.  To avoid any
   // searching, assign the first `nproc` zones to the `nproc` entries
   // in `work_vector`.  Avoids searching...
+  if (zones.size() < work_vector.size()) {
+    std::ostringstream errmsg;
+    fmt::print(errmsg,
+               "IOCGNS error: Could not decompose mesh across {} processors based on constraints.",
+               work_vector.size());
+    IOSS_ERROR(errmsg);
+  }
   assert(zones.size() >= work_vector.size());
   size_t i = 0;
   for (; i < work_vector.size(); i++) {
     auto &zone   = zones[i];
     zone->m_proc = i;
     if (verbose) {
-      fmt::print(
-          stderr,
-          "Assigning zone '{}' with work {:n} to processor {}. Changing work from {:n} to {:n}\n",
-          zone->m_name, zone->work(), zone->m_proc, work_vector[i], zone->work() + work_vector[i]);
+      fmt::print(Ioss::DEBUG(),
+                 "Assigning zone '{}' with work {} to processor {}. Changing work from {} to {}\n",
+                 zone->m_name, fmt::group_digits(zone->work()), zone->m_proc,
+                 fmt::group_digits(work_vector[i]),
+                 fmt::group_digits(zone->work() + work_vector[i]));
     }
     work_vector[i] += zone->work();
     proc_adam_map.insert(std::make_pair(zone->m_adam->m_zone, zone->m_proc));
@@ -2358,7 +2580,7 @@ void Iocgns::Utils::assign_zones_to_procs(std::vector<Iocgns::StructuredZoneData
 
     // Assign zone to processor with minimum work that does not already have a zone with the same
     // adam zone...
-    ssize_t proc = proc_with_minimum_work(zone, work_vector, proc_adam_map);
+    int proc = proc_with_minimum_work(zone, work_vector, proc_adam_map);
 
     // See if any other zone on this processor has the same adam zone...
     if (proc >= 0) {
@@ -2366,11 +2588,12 @@ void Iocgns::Utils::assign_zones_to_procs(std::vector<Iocgns::StructuredZoneData
       if (success.second) {
         zone->m_proc = proc;
         if (verbose) {
-          fmt::print(stderr,
-                     "Assigning zone '{}' with work {:n} to processor {}. Changing work from {:n} "
-                     "to {:n}\n",
-                     zone->m_name, zone->work(), zone->m_proc, work_vector[proc],
-                     zone->work() + work_vector[proc]);
+          fmt::print(Ioss::DEBUG(),
+                     "Assigning zone '{}' with work {} to processor {}. Changing work from {} "
+                     "to {}\n",
+                     zone->m_name, fmt::group_digits(zone->work()), zone->m_proc,
+                     fmt::group_digits(work_vector[proc]),
+                     fmt::group_digits(zone->work() + work_vector[proc]));
         }
         work_vector[proc] += zone->work();
       }
@@ -2388,11 +2611,13 @@ void Iocgns::Utils::assign_zones_to_procs(std::vector<Iocgns::StructuredZoneData
   }
 }
 
-size_t Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones, double avg_work,
-                                double load_balance, int proc_rank, int proc_count, bool verbose)
+int Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones, double avg_work,
+                             double load_balance, int proc_rank, int proc_count, bool verbose)
 {
-  auto   new_zones(zones);
-  size_t new_zone_id = zones.size() + 1;
+  auto original_zones(zones); // In case we need to call this again...
+
+  auto new_zones(zones);
+  int  new_zone_id = static_cast<int>(zones.size()) + 1;
 
   // See if can split each zone over a set of procs...
   double           total_work = 0.0;
@@ -2464,8 +2689,7 @@ size_t Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones
 
   if (adaptive_avg) {
     for (size_t i = 0; i < zones.size(); i++) {
-      auto zone       = zones[i];
-      int  num_active = 0;
+      auto zone = zones[i];
 
       auto work_average = avg_work;
       int  split_cnt    = splits[i];
@@ -2474,7 +2698,8 @@ size_t Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones
       }
 
       std::vector<std::pair<int, Iocgns::StructuredZoneData *>> active;
-      active.push_back(std::make_pair(split_cnt, zone));
+      active.emplace_back(split_cnt, zone);
+      int num_active = 0;
       do {
         assert(!active.empty());
         split_cnt = active.back().first;
@@ -2497,8 +2722,8 @@ size_t Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones
               new_zones.push_back(children.first);
               new_zones.push_back(children.second);
               new_zone_id += 2;
-              active.push_back(std::make_pair(split_cnt - max_power_2, children.second));
-              active.push_back(std::make_pair(max_power_2, children.first));
+              active.emplace_back(split_cnt - max_power_2, children.second);
+              active.emplace_back(max_power_2, children.first);
               num_active++;
             }
           }
@@ -2511,17 +2736,16 @@ size_t Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones
     }
   }
   else {
-    for (size_t i = 0; i < zones.size(); i++) {
-      auto zone       = zones[i];
-      int  num_active = 0;
+    for (auto &zone : zones) {
       if (zone->work() <= max_avg) {
         // This zone is already in `new_zones`; just skip doing anything else with it.
       }
       else {
         std::vector<std::pair<int, Iocgns::StructuredZoneData *>> active;
 
-        double work      = zone->work();
-        int    split_cnt = int(work / avg_work);
+        double work       = zone->work();
+        int    split_cnt  = int(work / avg_work);
+        int    num_active = 0;
 
         // Find modulus of work % avg_work and split off that amount
         // which will be < avg_work.
@@ -2533,14 +2757,14 @@ size_t Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones
             new_zones.push_back(children.second);
             new_zone_id += 2;
             num_active++;
-            active.push_back(std::make_pair(split_cnt, children.second));
+            active.emplace_back(split_cnt, children.second);
           }
           else {
-            active.push_back(std::make_pair(split_cnt, zone));
+            active.emplace_back(split_cnt, zone);
           }
         }
         else {
-          active.push_back(std::make_pair(split_cnt, zone));
+          active.emplace_back(split_cnt, zone);
         }
 
         // The work remaining on this zone should be approximately
@@ -2570,8 +2794,8 @@ size_t Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones
                 new_zones.push_back(children.first);
                 new_zones.push_back(children.second);
                 new_zone_id += 2;
-                active.push_back(std::make_pair(split_cnt - max_power_2, children.second));
-                active.push_back(std::make_pair(max_power_2, children.first));
+                active.emplace_back(split_cnt - max_power_2, children.second);
+                active.emplace_back(max_power_2, children.first);
                 num_active++;
               }
             }
@@ -2585,92 +2809,119 @@ size_t Iocgns::Utils::pre_split(std::vector<Iocgns::StructuredZoneData *> &zones
     }
   }
   std::swap(new_zones, zones);
-  if (zones.size() < (size_t)proc_count && load_balance > 1.05) {
+  size_t active = std::count_if(zones.begin(), zones.end(),
+                                [](const Iocgns::StructuredZoneData *z) { return z->is_active(); });
+
+  if (active < (size_t)proc_count && load_balance > 1.05) {
     // Tighten up the load_balance factor to get some decomposition going...
     double new_load_balance = (1.0 + load_balance) / 2.0;
+
+    // If any of the original zones were split the first time we called this routine,
+    // we need to delete the zones created via splitting.
+    // Also reset the parent zone to not have any children...
+    for (auto &zone : zones) {
+      if (!zone->is_active()) {
+        zone->m_child1 = nullptr;
+        zone->m_child2 = nullptr;
+      }
+      if (zone->m_adam != zone) {
+        // Created via a split; delete...
+        delete zone;
+      }
+    }
+
+    // Revert `zones` back to original version (with no zones split)
+    zones       = original_zones;
     new_zone_id = pre_split(zones, avg_work, new_load_balance, proc_rank, proc_count, verbose);
   }
   return new_zone_id;
 }
 
-std::vector<Iocgns::ZoneBC> Iocgns::Utils::parse_zonebc_sideblocks(int cgns_file_ptr, int base, int zone,
-							   int myProcessor)
-  {
-    int num_bc;
-    CGCHECK(cg_nbocos(cgns_file_ptr, base, zone, &num_bc));
+std::vector<Iocgns::ZoneBC> Iocgns::Utils::parse_zonebc_sideblocks(int cgns_file_ptr, int base,
+                                                                   int zone, int myProcessor)
+{
+  int num_bc;
+  CGCHECK(cg_nbocos(cgns_file_ptr, base, zone, &num_bc));
 
-    std::vector<Iocgns::ZoneBC> zonebc;
-    zonebc.reserve(num_bc);
+  std::vector<Iocgns::ZoneBC> zonebc;
+  zonebc.reserve(num_bc);
 
-    for (int i = 0; i < num_bc; i++) {
-      char              boco_name[CGNS_MAX_NAME_LENGTH + 1];
-      CG_BCType_t       boco_type;
-      CG_PointSetType_t ptset_type;
-      cgsize_t          num_pnts;
-      cgsize_t          normal_list_size; // ignore
-      CG_DataType_t     normal_data_type; // ignore
-      int               num_dataset;      // ignore
-      CGCHECK(cg_boco_info(cgns_file_ptr, base, zone, i + 1, boco_name, &boco_type, &ptset_type,
-                           &num_pnts, nullptr, &normal_list_size, &normal_data_type, &num_dataset));
+  for (int i = 0; i < num_bc; i++) {
+    char boco_name[CGNS_MAX_NAME_LENGTH + 1];
+    CGNS_ENUMT(BCType_t) boco_type;
+    CGNS_ENUMT(PointSetType_t) ptset_type;
+    cgsize_t num_pnts;
+    cgsize_t normal_list_size;               // ignore
+    CGNS_ENUMT(DataType_t) normal_data_type; // ignore
+    int num_dataset;                         // ignore
+    CGCHECK(cg_boco_info(cgns_file_ptr, base, zone, i + 1, boco_name, &boco_type, &ptset_type,
+                         &num_pnts, nullptr, &normal_list_size, &normal_data_type, &num_dataset));
 
-      if (num_pnts != 2 || ptset_type != CG_PointRange) {
-        std::ostringstream errmsg;
-        fmt::print(
-            errmsg,
-            "CGNS: In Zone {}, boundary condition '{}' has a PointSetType of '{}' and {} points.\n"
-            "      The type must be 'PointRange' and there must be 2 points.",
-            zone, boco_name, cg_PointSetTypeName(ptset_type), num_pnts);
-        IOSS_ERROR(errmsg);
-      }
-
-      std::array<cgsize_t, 2> point_range;
-      CGCHECK(cg_boco_read(cgns_file_ptr, base, zone, i + 1, point_range.data(), nullptr));
-      zonebc.emplace_back(boco_name, point_range);
+    if (num_pnts != 2 || ptset_type != CGNS_ENUMV(PointRange)) {
+      std::ostringstream errmsg;
+      fmt::print(
+          errmsg,
+          "CGNS: In Zone {}, boundary condition '{}' has a PointSetType of '{}' and {} points.\n"
+          "      The type must be 'PointRange' and there must be 2 points.",
+          zone, boco_name, cg_PointSetTypeName(ptset_type), num_pnts);
+      IOSS_ERROR(errmsg);
     }
-    return zonebc;
+
+    std::array<cgsize_t, 2> point_range;
+    CGCHECK(cg_boco_read(cgns_file_ptr, base, zone, i + 1, point_range.data(), nullptr));
+    zonebc.emplace_back(boco_name, point_range);
   }
+  return zonebc;
+}
 
 #ifdef CG_BUILD_HDF5
 extern "C" int H5get_libversion(unsigned *, unsigned *, unsigned *);
 #endif
 
-void Iocgns::Utils::show_config()
+std::string Iocgns::Utils::show_config()
 {
-  fmt::print(stderr, "\tCGNS Library Version: {}\n", CGNS_DOTVERS);
+  std::stringstream config;
+  fmt::print(config, "\tCGNS Library Version: {}\n", CGNS_DOTVERS);
 #if CG_BUILD_64BIT
-  fmt::print(stderr, "\t\tDefault integer size is 64-bit.\n");
+  fmt::print(config, "\t\tDefault integer size is 64-bit.\n");
 #else
-  fmt::print(stderr, "\t\tDefault integer size is 32-bit.\n");
+  fmt::print(config, "\t\tDefault integer size is 32-bit.\n");
 #endif
 #if defined(CGNS_SCOPE_ENUMS)
-  fmt::print(stderr, "\t\tScoped Enums enabled\n");
+  fmt::print(config, "\t\tScoped Enums enabled\n");
 #else
-  fmt::print(stderr, "\t\tScoped Enums NOT enabled\n");
+  fmt::print(config, "\t\tScoped Enums NOT enabled\n");
+#endif
+#if defined(CG_COMPACT)
+  fmt::print(config, "\t\tCompact Storage enabled\n");
+#else
+  fmt::print(config, "\t\tCompact Storage NOT enabled\n");
 #endif
 #if CG_BUILD_PARALLEL
-  fmt::print(stderr, "\t\tParallel enabled\n");
+  fmt::print(config, "\t\tParallel enabled\n");
 #else
-  fmt::print(stderr, "\t\tParallel NOT enabled\n");
+  fmt::print(config, "\t\tParallel NOT enabled\n");
 #endif
 #if CG_BUILD_HDF5
   unsigned major;
   unsigned minor;
   unsigned release;
   H5get_libversion(&major, &minor, &release);
-  fmt::print(stderr, "\t\tHDF5 enabled ({}.{}.{})\n", major, minor, release);
+  fmt::print(config, "\t\tHDF5 enabled ({}.{}.{})\n", major, minor, release);
 #else
 #error "Not defined..."
 #endif
 #if HDF5_HAVE_COLL_METADATA
-  fmt::print(stderr, "\t\tUsing HDF5 Collective Metadata.\n");
+  fmt::print(config, "\t\tUsing HDF5 Collective Metadata.\n");
 #else
-  fmt::print(stderr, "\t\tHDF5 Collective Metadata NOT Available.\n");
+  fmt::print(config, "\t\tHDF5 Collective Metadata NOT Available.\n");
 #endif
 #if HDF5_HAVE_MULTI_DATASET
-  fmt::print(stderr, "\t\tHDF5 Multi-Dataset Available.\n\n");
+  fmt::print(config, "\t\tHDF5 Multi-Dataset Available.\n\n");
 #else
-  fmt::print(stderr, "\t\tHDF5 Multi-Dataset NOT Available.\n\n");
+  fmt::print(config, "\t\tHDF5 Multi-Dataset NOT Available.\n\n");
 #endif
+  return config.str();
 }
 
 namespace {

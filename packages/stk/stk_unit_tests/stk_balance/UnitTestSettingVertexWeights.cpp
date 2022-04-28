@@ -39,10 +39,10 @@ public:
 
         Zoltan2ParallelGraph zoltan2Graph;
         stk::balance::FieldVertexWeightSettings graphSettings(get_bulk(), *vertexWeightField, 0.0);
-        stk::mesh::Selector sel = get_meta().locally_owned_part();
-        stk::balance::internal::createZoltanParallelGraph(graphSettings, get_bulk(), std::vector<stk::mesh::Selector>{sel}, localIds, zoltan2Graph);
+        stk::mesh::Selector sel = get_meta().universal_part();
+        stk::balance::internal::createZoltanParallelGraph(get_bulk(), sel, get_comm(), graphSettings, zoltan2Graph);
 
-        zoltan2Graph.adjust_vertex_weights(graphSettings, get_bulk(), std::vector<stk::mesh::Selector>{sel}, localIds);
+        zoltan2Graph.adjust_vertex_weights(graphSettings, get_bulk(), sel, localIds);
         check_graph_vertex_weights(zoltan2Graph.get_vertex_ids(), zoltan2Graph.get_vertex_weights());
     }
 
@@ -113,16 +113,7 @@ private:
 };
 
 
-TEST_F(VertexWeightSettings, checkVertexWeightsWithoutAura)
-{
-    if(stk::parallel_machine_size(get_comm()) == 2)
-    {
-        setup_mesh_with_global_element_count_set("generated:1x1x20", stk::mesh::BulkData::NO_AUTO_AURA);
-        test_setting_of_vertex_weights_via_field();
-    }
-}
-
-TEST_F(VertexWeightSettings, checkVertexWeightsWithAura)
+TEST_F(VertexWeightSettings, checkVertexWeights)
 {
     if(stk::parallel_machine_size(get_comm()) == 2)
     {

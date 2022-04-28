@@ -57,6 +57,7 @@
 #include "MueLu_ConfigDefs.hpp"
 
 #include "MueLu_Exceptions.hpp"
+#include "MueLu_Aggregates.hpp"
 #include "MueLu_Hierarchy.hpp"
 #include "MueLu_HierarchyFactory.hpp"
 #include "MueLu_Level.hpp"
@@ -85,18 +86,20 @@ namespace MueLu {
 
   public:
 
-    //!
+    //! Constructor
     HierarchyManager(int numDesiredLevel = MasterList::getDefault<int>("max levels")) :
-        numDesiredLevel_        (numDesiredLevel),
-        maxCoarseSize_          (MasterList::getDefault<int>("coarse: max size")),
-        verbosity_              (Medium),
-        doPRrebalance_          (MasterList::getDefault<bool>("repartition: rebalance P and R")),
-        implicitTranspose_      (MasterList::getDefault<bool>("transpose: use implicit")),
-        fuseProlongationAndUpdate_ (MasterList::getDefault<bool>("fuse prolongation and update")),
-        graphOutputLevel_(-1) { }
+        numDesiredLevel_(numDesiredLevel),
+        maxCoarseSize_(MasterList::getDefault<int>("coarse: max size")),
+        verbosity_(Medium),
+        doPRrebalance_(MasterList::getDefault<bool>("repartition: rebalance P and R")),
+        implicitTranspose_(MasterList::getDefault<bool>("transpose: use implicit")),
+        fuseProlongationAndUpdate_(MasterList::getDefault<bool>("fuse prolongation and update")),
+        suppressNullspaceDimensionCheck_(MasterList::getDefault<bool>("nullspace: suppress dimension check")),
+        sizeOfMultiVectors_(MasterList::getDefault<int>("number of vectors")),
+        graphOutputLevel_(-2) { }
 
-    //!
-    virtual ~HierarchyManager() { }
+    //! Destructor
+    virtual ~HierarchyManager() = default;
 
     //!
     void AddFactoryManager(int startLevel, int numDesiredLevel, RCP<FactoryManagerBase> manager) {
@@ -139,14 +142,33 @@ namespace MueLu {
     virtual void SetupHierarchy(Hierarchy& H) const {
       TEUCHOS_TEST_FOR_EXCEPTION(!H.GetLevel(0)->IsAvailable("A"), Exceptions::RuntimeError, "No fine level operator");
 
-      RCP<Level>    l0 = H.GetLevel(0);
-      RCP<Operator> Op = l0->Get<RCP<Operator> >("A");
-      // Check that user-supplied nullspace dimension is at least as large as NumPDEs
+      RCP<Level> l0 = H.GetLevel(0);
+      RCP<Operator> Op = l0->Get<RCP<Operator>>("A");
+
+      // Compare nullspace dimension to NumPDEs and throw/warn based on user input
       if (l0->IsAvailable("Nullspace")) {
         RCP<Matrix> A = Teuchos::rcp_dynamic_cast<Matrix>(Op);
         if (A != Teuchos::null) {
-          Teuchos::RCP<MultiVector> nullspace = l0->Get<RCP<MultiVector> >("Nullspace");
-          TEUCHOS_TEST_FOR_EXCEPTION(static_cast<size_t>(A->GetFixedBlockSize()) > nullspace->getNumVectors(), Exceptions::RuntimeError, "user-provided nullspace has fewer vectors (" << nullspace->getNumVectors() << ") than number of PDE equations (" << A->GetFixedBlockSize() << ")");
+          RCP<MultiVector> nullspace = l0->Get<RCP<MultiVector>>("Nullspace");
+
+          if (static_cast<size_t>(A->GetFixedBlockSize()) > nullspace->getNumVectors())
+          {
+            std::stringstream msg;
+            msg << "User-provided nullspace has fewer vectors ("
+                << nullspace->getNumVectors() << ") than number of PDE equations ("
+                << A->GetFixedBlockSize() << "). ";
+
+            if (suppressNullspaceDimensionCheck_)
+            {
+              msg << "It depends on the PDE, if this is a problem or not.";
+              this->GetOStream(Warnings0) << msg.str() << std::endl;
+            }
+            else
+            {
+              msg << "Add the missing nullspace vectors! (You can suppress this check. See the MueLu user guide for details.)";
+              TEUCHOS_TEST_FOR_EXCEPTION(static_cast<size_t>(A->GetFixedBlockSize()) > nullspace->getNumVectors(), Exceptions::RuntimeError, msg.str());
+            }
+          }
         } else {
           this->GetOStream(Warnings0) << "Skipping dimension check of user-supplied nullspace because user-supplied operator is not a matrix" << std::endl;
         }
@@ -171,8 +193,8 @@ namespace MueLu {
       // Setup Hierarchy
       H.SetMaxCoarseSize(maxCoarseSize_);
       VerboseObject::SetDefaultVerbLevel(verbosity_);
-      if (graphOutputLevel_ >= 0)
-        H.EnableGraphDumping("dep_graph.dot", graphOutputLevel_);
+      if (graphOutputLevel_ >= 0 || graphOutputLevel_ == -1)
+        H.EnableGraphDumping("dep_graph", graphOutputLevel_);
 
       if (VerboseObject::IsPrint(Statistics2)) {
         RCP<Matrix> Amat = rcp_dynamic_cast<Matrix>(Op);
@@ -229,6 +251,8 @@ namespace MueLu {
       ExportDataSetKeepFlags(H, restrictorsToPrint_,  "R");
       ExportDataSetKeepFlags(H, nullspaceToPrint_,  "Nullspace");
       ExportDataSetKeepFlags(H, coordinatesToPrint_,  "Coordinates");
+      // NOTE: Aggregates use the next level's Factory
+      ExportDataSetKeepFlagsNextLevel(H, aggregatesToPrint_,  "Aggregates");
 #ifdef HAVE_MUELU_INTREPID2
       ExportDataSetKeepFlags(H,elementToNodeMapsToPrint_, "pcoarsen: element to node map");
 #endif
@@ -242,14 +266,17 @@ namespace MueLu {
                          LvlMngr(levelID-1, lastLevelID),
                          LvlMngr(levelID,   lastLevelID),
                          LvlMngr(levelID+1, lastLevelID));
+        H.GetLevel(levelID)->print(H.GetOStream(Developer), verbosity_);
 
         isLastLevel = r || (levelID == lastLevelID);
         levelID++;
       }
       if (!matvecParams_.is_null())
         H.SetMatvecParams(matvecParams_);
-      // FIXME: Should allow specification of NumVectors on parameterlist
-      H.AllocateLevelMultiVectors(1);
+      H.AllocateLevelMultiVectors(sizeOfMultiVectors_);
+      // Set hierarchy description.
+      // This is cached, but involves and MPI_Allreduce.
+      H.description();
       H.describe(H.GetOStream(Runtime0), verbosity_);
 
       // When we reuse hierarchy, it is necessary that we don't
@@ -268,6 +295,7 @@ namespace MueLu {
       WriteData<Matrix>(H, restrictorsToPrint_,  "R");
       WriteData<MultiVector>(H, nullspaceToPrint_,  "Nullspace");
       WriteData<MultiVector>(H, coordinatesToPrint_,  "Coordinates");
+      WriteDataAggregates(H, aggregatesToPrint_,  "Aggregates");
 #ifdef HAVE_MUELU_INTREPID2
       typedef Kokkos::DynRankView<LocalOrdinal,typename Node::device_type> FCi;
       WriteDataFC<FCi>(H,elementToNodeMapsToPrint_, "pcoarsen: element to node map","el2node");
@@ -309,23 +337,43 @@ namespace MueLu {
       return GetFactoryManager(levelID);
     }
 
-    // Hierarchy parameters
-    mutable int           numDesiredLevel_;
+    //! @group Hierarchy parameters
+    //! @{
+
+    mutable int numDesiredLevel_;
     Xpetra::global_size_t maxCoarseSize_;
-    MsgType               verbosity_;
-    bool                  doPRrebalance_;
-    bool                  implicitTranspose_;
-    bool                  fuseProlongationAndUpdate_;
-    int                   graphOutputLevel_;
-    Teuchos::Array<int>   matricesToPrint_;
-    Teuchos::Array<int>   prolongatorsToPrint_;
-    Teuchos::Array<int>   restrictorsToPrint_;
-    Teuchos::Array<int>   nullspaceToPrint_;
-    Teuchos::Array<int>   coordinatesToPrint_;
-    Teuchos::Array<int>   elementToNodeMapsToPrint_;
+    MsgType verbosity_;
+
+    bool doPRrebalance_;
+    bool implicitTranspose_;
+    bool fuseProlongationAndUpdate_;
+
+    /*! @brief Flag to indicate whether the check of the nullspace dimension is suppressed
+
+    By default, we do not suppress such a check, as it acts as a safety mechanism.
+    Yet, certain scenarios deliberately use nullspaces with less nullspace vectors than NumPDEs.
+    Therefore, the user can suppress this check. Then, the error message is converted to a warning.
+    */
+    bool suppressNullspaceDimensionCheck_;
+
+    int sizeOfMultiVectors_;
+
+    //! -2 = no output, -1 = all levels
+    int graphOutputLevel_;
+
+    //! Lists of entities to be exported
+    Teuchos::Array<int> matricesToPrint_;
+    Teuchos::Array<int> prolongatorsToPrint_;
+    Teuchos::Array<int> restrictorsToPrint_;
+    Teuchos::Array<int> nullspaceToPrint_;
+    Teuchos::Array<int> coordinatesToPrint_;
+    Teuchos::Array<int> aggregatesToPrint_;
+    Teuchos::Array<int> elementToNodeMapsToPrint_;
+
     Teuchos::RCP<Teuchos::ParameterList> matvecParams_;
 
     std::map<int, std::vector<keep_pair> > keep_;
+    //! @}
 
   private:
     // Set the keep flags for Export Data
@@ -333,8 +381,18 @@ namespace MueLu {
       for (int i = 0; i < data.size(); ++i) {
         if (data[i] < H.GetNumLevels()) {
           RCP<Level> L = H.GetLevel(data[i]);
-	  if(!L.is_null()  && data[i] < levelManagers_.size())
-	    L->AddKeepFlag(name, &*levelManagers_[data[i]]->GetFactory(name));
+      	  if(!L.is_null()  && data[i] < levelManagers_.size())
+      	    L->AddKeepFlag(name, &*levelManagers_[data[i]]->GetFactory(name));
+          }
+      }
+    }
+
+    void ExportDataSetKeepFlagsNextLevel(Hierarchy& H, const Teuchos::Array<int>& data, const std::string& name) const {
+      for (int i = 0; i < data.size(); ++i) {
+        if (data[i] < H.GetNumLevels()) {
+          RCP<Level> L = H.GetLevel(data[i]);
+      	  if(!L.is_null()  && data[i]+1 < levelManagers_.size())
+      	    L->AddKeepFlag(name, &*levelManagers_[data[i]+1]->GetFactory(name));
         }
       }
     }
@@ -358,18 +416,43 @@ namespace MueLu {
               Xpetra::IO<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Write(fileName,* M);
             }
           }
-	  else if (L->IsAvailable(name)) {
-	    // Try nofactory
+      	  else if (L->IsAvailable(name)) {
+      	    // Try nofactory
             RCP<T> M = L->template Get< RCP<T> >(name);
             if (!M.is_null()) {
               Xpetra::IO<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Write(fileName,* M);
             }
-	  }
+	        }
 
         }
       }
     }
 
+
+    void WriteDataAggregates(Hierarchy& H, const Teuchos::Array<int>& data, const std::string& name) const {
+      for (int i = 0; i < data.size(); ++i) {
+        const std::string fileName = name + "_" + Teuchos::toString(data[i]) + ".m";
+
+        if (data[i] < H.GetNumLevels()) {
+          RCP<Level> L = H.GetLevel(data[i]);
+
+          // NOTE: Aggregates use the next level's factory
+          RCP<Aggregates> agg;
+          if(data[i]+1 < H.GetNumLevels() && L->IsAvailable(name,&*levelManagers_[data[i]+1]->GetFactory(name))) {
+            // Try generating factory
+            agg = L->template Get< RCP<Aggregates> >(name,&*levelManagers_[data[i]+1]->GetFactory(name));
+          }
+          else if (L->IsAvailable(name)) {
+            agg = L->template Get<RCP<Aggregates> >("Aggregates");
+          }
+          if(!agg.is_null()) {
+            std::ofstream ofs(fileName);
+            Teuchos::FancyOStream fofs(rcp(&ofs,false));
+            agg->print(fofs,Teuchos::VERB_EXTREME);
+          }
+        }
+      }
+    }
 
     template<class T>
     void WriteDataFC(Hierarchy& H, const Teuchos::Array<int>& data, const std::string& name, const std::string & ofname) const {

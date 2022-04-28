@@ -213,12 +213,6 @@ namespace Intrepid2 {
       Teuchos::oblackholestream oldFormatState;
       oldFormatState.copyfmt(std::cout);
 
-      typedef typename
-        Kokkos::Impl::is_space<DeviceSpaceType>::host_mirror_space::execution_space HostSpaceType ;
-
-      *outStream << "DeviceSpace::  "; DeviceSpaceType::print_configuration(*outStream, false);
-      *outStream << "HostSpace::    ";   HostSpaceType::print_configuration(*outStream, false);
-
       *outStream 
         << "===============================================================================\n" \
         << "|                                                                             |\n" \
@@ -609,7 +603,9 @@ namespace Intrepid2 {
             
                 rst::subtract(interpolant, exact_solution);
 
-                ValueType relNorm = rst::Serial::vectorNorm(interpolant, NORM_TWO);
+                auto interpolant_h = Kokkos::create_mirror_view(interpolant);
+                Kokkos::deep_copy(interpolant_h, interpolant);
+                ValueType relNorm = rst::Serial::vectorNorm(interpolant_h, NORM_TWO);
                               
                 *outStream << "\nRelative norm-2 error between exact solution polynomial of order ("
                            << x_order << ", " << y_order << ", " << z_order

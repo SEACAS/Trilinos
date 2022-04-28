@@ -6,22 +6,9 @@
 // ****************************************************************************
 // @HEADER
 
-#include "Teuchos_UnitTestHarness.hpp"
-#include "Teuchos_XMLParameterListHelpers.hpp"
-#include "Teuchos_TimeMonitor.hpp"
-#include "Teuchos_DefaultComm.hpp"
 
-#include "Thyra_VectorStdOps.hpp"
+#include "Tempus_UnitTest_RK_Utils.hpp"
 
-#include "Tempus_StepperFactory.hpp"
-#include "Tempus_UnitTest_Utils.hpp"
-
-#include "../TestModels/SinCosModel.hpp"
-#include "../TestModels/VanDerPolModel.hpp"
-#include "../TestUtils/Tempus_ConvergenceTestUtils.hpp"
-
-#include <fstream>
-#include <vector>
 
 namespace Tempus_Unit_Test {
 
@@ -31,16 +18,17 @@ using Teuchos::rcp_const_cast;
 using Teuchos::rcp_dynamic_cast;
 using Teuchos::ParameterList;
 using Teuchos::sublist;
-using Teuchos::getParametersFromXmlFile;
-
-using Tempus::StepperFactory;
 
 
 // ************************************************************
 // ************************************************************
 TEUCHOS_UNIT_TEST(DIRK_1Stage1stOrderRadauIA, Default_Construction)
 {
-  testDIRKAccessorsFullConstruction("RK Implicit 1 Stage 1st order Radau IA");
+  auto stepper = rcp(new Tempus::StepperDIRK_1Stage1stOrderRadauIA<double>());
+  testDIRKAccessorsFullConstruction(stepper);
+
+  // Test stepper properties.
+  TEUCHOS_ASSERT(stepper->getOrder() == 1);
 }
 
 
@@ -57,7 +45,9 @@ TEUCHOS_UNIT_TEST(DIRK_1Stage1stOrderRadauIA, StepperFactory_Construction)
 // ************************************************************
 TEUCHOS_UNIT_TEST(DIRK_1Stage1stOrderRadauIA, AppAction)
 {
-  testRKAppAction("RK Implicit 1 Stage 1st order Radau IA", out, success);
+  auto stepper = rcp(new Tempus::StepperDIRK_1Stage1stOrderRadauIA<double>());
+  auto model = rcp(new Tempus_Test::SinCosModel<double>());
+  testRKAppAction(stepper, model, out, success);
 }
 
 

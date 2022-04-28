@@ -63,6 +63,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include <KokkosKernels_TestParameters.hpp>
 #include <KokkosGraph_Distance2Color.hpp>
+#include "KokkosKernels_default_types.hpp"
 
 using namespace KokkosGraph;
 
@@ -81,6 +82,7 @@ struct D2Parameters
   int use_threads;
   int use_openmp;
   int use_cuda;
+  int use_hip;
   int use_serial;
   const char* mtx_file;
   ColoringMode d2_color_type;
@@ -93,35 +95,16 @@ struct D2Parameters
     use_threads = 0;
     use_openmp = 0;
     use_cuda = 0;
+    use_hip = 0;
     use_serial = 0;
     mtx_file = NULL;
     d2_color_type = MODE_D2_SYMMETRIC;
   }
 };
 
-#ifdef KOKKOSKERNELS_INST_DOUBLE
-    typedef double kk_scalar_t;
-#else
-    #ifdef KOKKOSKERNELS_INST_FLOAT
-        typedef float kk_scalar_t;
-    #endif
-#endif
-
-#ifdef KOKKOSKERNELS_INST_OFFSET_INT
-    typedef int kk_size_type;
-#else
-    #ifdef KOKKOSKERNELS_INST_OFFSET_SIZE_T
-        typedef size_t kk_size_type;
-    #endif
-#endif
-
-#ifdef KOKKOSKERNELS_INST_ORDINAL_INT
-    typedef int kk_lno_t;
-#else
-    #ifdef KOKKOSKERNELS_INST_ORDINAL_INT64_T
-        typedef int64_t kk_lno_t;
-    #endif
-#endif
+typedef default_scalar kk_scalar_t;
+typedef default_size_type kk_size_type;
+typedef default_lno_t kk_lno_t;
 
 using namespace KokkosGraph;
 
@@ -147,6 +130,9 @@ void print_options(std::ostream &os, const char *app_name, unsigned int indent =
 #endif
 #ifdef KOKKOS_ENABLE_CUDA
        << spaces << "          --cuda <device id>  Use given CUDA device" << std::endl
+#endif
+#ifdef KOKKOS_ENABLE_HIP
+       << spaces << "          --hip <device id>  Use given HIP device" << std::endl
 #endif
        << std::endl
        << spaces << "  Coloring modes:" << std::endl
@@ -198,6 +184,10 @@ int parse_inputs(D2Parameters &params, int argc, char **argv)
         else if(0 == strcasecmp(argv[i], "--cuda"))
         {
             params.use_cuda = 1 + atoi(getNextArg(i, argc, argv));
+        }
+        else if(0 == strcasecmp(argv[i], "--hip"))
+        {
+            params.use_hip = 1 + atoi(getNextArg(i, argc, argv));
         }
         else if(0 == strcasecmp(argv[i], "--repeat"))
         {
@@ -273,7 +263,7 @@ int parse_inputs(D2Parameters &params, int argc, char **argv)
         print_options(std::cout, argv[0]);
         return 1;
     }
-    if(!params.use_serial && !params.use_threads && !params.use_openmp && !params.use_cuda)
+    if(!params.use_serial && !params.use_threads && !params.use_openmp && !params.use_cuda && !params.use_hip)
     {
         print_options(std::cout, argv[0]);
         return 1;
@@ -418,7 +408,7 @@ void run_experiment(crsGraph_t crsGraph, int num_cols, const D2Parameters& param
     // ------------------------------------------
     std::cout << "Compute Distance-2 Degree " << std::endl;
 
-    Kokkos::Impl::Timer timer;
+    Kokkos::Timer timer;
 
     double total_time                   = kh.get_distance2_graph_coloring_handle()->get_overall_coloring_time();
     double total_time_color_greedy      = kh.get_distance2_graph_coloring_handle()->get_overall_coloring_time_phase1();
@@ -603,6 +593,8 @@ int main(int argc, char *argv[])
     int device_id = 0;
     if(params.use_cuda)
       device_id = params.use_cuda - 1;
+    else if(params.use_hip)
+      device_id = params.use_hip - 1;
     Kokkos::initialize(Kokkos::InitArguments(num_threads, -1, device_id));
 
     // Print out verbose information about the configuration of the run.
@@ -641,6 +633,16 @@ int main(int argc, char *argv[])
         if(!use_multi_mem)
         {
             KokkosKernels::Experiment::experiment_driver<kk_size_type, kk_lno_t, Kokkos::Cuda, Kokkos::Cuda::memory_space>(params);
+        }
+    }
+    #endif
+
+    #if defined(KOKKOS_ENABLE_HIP)
+    if(params.use_hip)
+    {
+        if(!use_multi_mem)
+        {
+            KokkosKernels::Experiment::experiment_driver<kk_size_type, kk_lno_t, Kokkos::Experimental::HIP, Kokkos::Experimental::HIPSpace>(params);
         }
     }
     #endif

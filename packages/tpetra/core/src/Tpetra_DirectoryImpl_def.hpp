@@ -354,7 +354,7 @@ namespace Tpetra {
       // Put the max cap at the end.  Adding one lets us write loops
       // over the global IDs with the usual strict less-than bound.
       allMinGIDs_[numProcs] = map.getMaxAllGlobalIndex ()
-        + Teuchos::OrdinalTraits<GO>::one ();
+                            + Teuchos::OrdinalTraits<GO>::one ();
     }
 
     template<class LO, class GO, class NT>
@@ -431,17 +431,21 @@ namespace Tpetra {
       RCP<const Teuchos::Comm<int> > comm = map.getComm ();
       const int numProcs = comm->getSize ();
       const LO LINVALID = Teuchos::OrdinalTraits<LO>::invalid();
+      const GO noGIDsOnProc = std::numeric_limits<GO>::max();
       LookupStatus res = AllIDsPresent;
 
       // Find the first initialized GID for search below
-      auto it = std::find_if(
-        allMinGIDs_.begin(),
-        allMinGIDs_.end()-1,
-        [](GO const gid) { return gid != std::numeric_limits<GO>::max(); }
-      );
+      int firstProcWithGIDs;
+      for (firstProcWithGIDs = 0; firstProcWithGIDs < numProcs;
+           firstProcWithGIDs++) {
+        if (allMinGIDs_[firstProcWithGIDs] != noGIDsOnProc) break;
+      }
 
-      if (it == allMinGIDs_.end()-1) {
-        // No entries have been assigned on this process
+      // If Map is empty, return invalid values for all requested lookups
+      // This case should not happen, as an empty Map is not considered
+      // Distributed.
+      if (firstProcWithGIDs == numProcs) {
+        // No entries in Map
         res = (globalIDs.size() > 0) ? IDNotPresent : AllIDsPresent;
         std::fill(nodeIDs.begin(), nodeIDs.end(), -1);
         if (computeLIDs)
@@ -449,8 +453,9 @@ namespace Tpetra {
         return res;
       }
 
-      const auto i0 = as<GO>(std::distance(allMinGIDs_.begin(), it));
-      const global_size_t nOverP = map.getGlobalNumElements () / as<global_size_t>(numProcs - i0);
+      const GO one = as<GO> (1);
+      const GO nOverP = as<GO> (map.getGlobalNumElements ()
+                      / as<global_size_t>(numProcs - firstProcWithGIDs));
 
       // Map is distributed but contiguous.
       typename ArrayView<int>::iterator procIter = nodeIDs.begin();
@@ -460,34 +465,50 @@ namespace Tpetra {
         LO LID = LINVALID; // Assume not found until proven otherwise
         int image = -1;
         GO GID = *gidIter;
-        // Guess uniform distribution and start a little above it
-        // TODO: replace by a binary search
+        // Guess uniform distribution (TODO: maybe replace by a binary search)
+        // We go through all this trouble to avoid overflow and
+        // signed / unsigned casting mistakes (that were made in
+        // previous versions of this code).
         int curRank;
-        { // We go through all this trouble to avoid overflow and
-          // signed / unsigned casting mistakes (that were made in
-          // previous versions of this code).
-          const GO one = as<GO> (1);
-          const GO two = as<GO> (2);
-          const GO nOverP_GID = as<GO> (nOverP);
-          const GO lowerBound = i0 + GID / std::max(nOverP_GID, one) + two;
-          curRank = as<int>(std::min(lowerBound, as<GO>(numProcs - 1)));
+        const GO firstGuess = firstProcWithGIDs + GID / std::max(nOverP, one);
+        curRank = as<int>(std::min(firstGuess, as<GO>(numProcs - 1)));
+
+        // This while loop will stop because 
+        // allMinGIDs_[np] == global num elements
+        while (allMinGIDs_[curRank] == noGIDsOnProc) curRank++;
+
+        bool badGID = false;
+        while (curRank >= firstProcWithGIDs && GID < allMinGIDs_[curRank]) {
+          curRank--;
+          while (curRank >= firstProcWithGIDs && 
+                 allMinGIDs_[curRank] == noGIDsOnProc) curRank--;
         }
-        bool found = false;
-        while (curRank >= 0 && curRank < numProcs) {
-          if (allMinGIDs_[curRank] <= GID) {
-            if (GID < allMinGIDs_[curRank + 1]) {
-              found = true;
+        if (curRank < firstProcWithGIDs) {
+          // GID is lower than all GIDs in map
+          badGID = true;
+        }
+        else if (curRank == numProcs) {
+          // GID is higher than all GIDs in map
+          badGID = true;
+        }
+        else {
+          // we have the lower bound; now limit from above
+          int above = curRank + 1;
+          while (allMinGIDs_[above] == noGIDsOnProc) above++;
+
+          while (GID >= allMinGIDs_[above]) {
+            curRank = above;
+            if (curRank == numProcs) {
+              // GID is higher than all GIDs in map
+              badGID = true;
               break;
             }
-            else {
-              curRank++;
-            }
-          }
-          else {
-            curRank--;
+            above++;
+            while (allMinGIDs_[above] == noGIDsOnProc) above++;
           }
         }
-        if (found) {
+
+        if (!badGID) {
           image = curRank;
           LID = as<LO> (GID - allMinGIDs_[image]);
         }
@@ -574,7 +595,7 @@ namespace Tpetra {
       // from the minimum to the maximum GID of the user Map, and a
       // minimum GID of minAllGID from the user Map.  It doesn't
       // actually have to store all those entries, though do beware of
-      // calling getNodeElementList on it (see Bug 5822).
+      // calling getLocalElementList on it (see Bug 5822).
       const global_size_t numGlobalEntries = maxAllGID - minAllGID + 1;
 
       // We can't afford to replicate the whole directory on each
@@ -588,7 +609,7 @@ namespace Tpetra {
       directoryMap_ = rcp (new map_type (numGlobalEntries, minAllGID, comm,
                                          GloballyDistributed));
       // The number of Directory elements that my process owns.
-      const size_t dir_numMyEntries = directoryMap_->getNodeNumElements ();
+      const size_t dir_numMyEntries = directoryMap_->getLocalNumElements ();
 
       // Fix for Bug 5822: If the input Map is "sparse," that is if
       // the difference between the global min and global max GID is
@@ -614,15 +635,15 @@ namespace Tpetra {
       // switch to a hash table - based implementation.
       const size_t inverseSparsityThreshold = 10;
       useHashTables_ =
-        (dir_numMyEntries >= inverseSparsityThreshold * map.getNodeNumElements());
+        (dir_numMyEntries >= inverseSparsityThreshold * map.getLocalNumElements());
 
       // Get list of process IDs that own the directory entries for the
       // Map GIDs.  These will be the targets of the sends that the
       // Distributor will do.
       const int myRank = comm->getRank ();
-      const size_t numMyEntries = map.getNodeNumElements ();
+      const size_t numMyEntries = map.getLocalNumElements ();
       Array<int> sendImageIDs (numMyEntries);
-      ArrayView<const GO> myGlobalEntries = map.getNodeElementList ();
+      ArrayView<const GO> myGlobalEntries = map.getLocalElementList ();
       // An ID not present in this lookup indicates that it lies outside
       // of the range [minAllGID,maxAllGID] (from map_).  this means
       // something is wrong with map_, our fault.
@@ -636,7 +657,7 @@ namespace Tpetra {
         << Teuchos::toString (sendImageIDs ()) << ".  The input Map itself has "
         "the following entries on the calling process " <<
         map.getComm ()->getRank () << ": " <<
-        Teuchos::toString (map.getNodeElementList ()) << ", and has "
+        Teuchos::toString (map.getLocalElementList ()) << ", and has "
         << map.getGlobalNumElements () << " total global indices in ["
         << map.getMinAllGlobalIndex () << "," << map.getMaxAllGlobalIndex ()
         << "].  The Directory Map has "
@@ -669,10 +690,10 @@ namespace Tpetra {
       // required, and the latter is generally the case, but we should
       // still check for this.
       const int packetSize = 3; // We're sending triples, so packet size is 3.
-      Array<GO> exportEntries (packetSize * numMyEntries); // data to send out
+      Kokkos::View<GO*, Kokkos::HostSpace> exportEntries("exportEntries", packetSize * numMyEntries);
       {
-        size_type exportIndex = 0;
-        for (size_type i = 0; i < static_cast<size_type> (numMyEntries); ++i) {
+        size_t exportIndex = 0;
+        for (size_t i = 0; i < numMyEntries; ++i) {
           exportEntries[exportIndex++] = myGlobalEntries[i];
           exportEntries[exportIndex++] = as<GO> (myRank);
           exportEntries[exportIndex++] = as<GO> (i);
@@ -681,10 +702,10 @@ namespace Tpetra {
       // Buffer of data to receive.  The Distributor figured out for
       // us how many packets we're receiving, when we called its
       // createFromSends() method to set up the distribution plan.
-      Array<GO> importElements (packetSize * distor.getTotalReceiveLength ());
+      Kokkos::View<GO*, Kokkos::HostSpace> importElements("importElements", packetSize * distor.getTotalReceiveLength());
 
       // Distribute the triples of (GID, process ID, LID).
-      distor.doPostsAndWaits (exportEntries ().getConst (), packetSize, importElements ());
+      distor.doPostsAndWaits(exportEntries, packetSize, importElements);
 
       // Unpack the redistributed data.  Both implementations of
       // Directory storage map from an LID in the Directory Map (which
@@ -747,15 +768,11 @@ namespace Tpetra {
           // Set up the hash tables.  The hash tables' constructor
           // detects whether there are duplicates, so that we can set
           // locallyOneToOne_.
-          typedef Kokkos::Device<typename NT::execution_space,
-            typename NT::memory_space> DT;
           lidToPidTable_ =
-            rcp (new Details::FixedHashTable<LO, int, DT> (tableKeys (),
-                                                           tablePids ()));
+            rcp (new lidToPidTable_type (tableKeys (), tablePids ()));
           locallyOneToOne_ = ! (lidToPidTable_->hasDuplicateKeys ());
           lidToLidTable_ =
-            rcp (new Details::FixedHashTable<LO, LO, DT> (tableKeys (),
-                                                          tableLids ()));
+            rcp (new lidToLidTable_type (tableKeys (), tableLids ()));
         }
         else { // tie_break is NOT null
 
@@ -828,14 +845,10 @@ namespace Tpetra {
           }
 
           // Set up the hash tables.
-          typedef Kokkos::Device<typename NT::execution_space,
-            typename NT::memory_space> DT;
           lidToPidTable_ =
-            rcp (new Details::FixedHashTable<LO, int, DT> (tableKeys (),
-                                                           tablePids ()));
+            rcp (new lidToPidTable_type (tableKeys (), tablePids ()));
           lidToLidTable_ =
-            rcp (new Details::FixedHashTable<LO, LO, DT> (tableKeys (),
-                                                          tableLids ()));
+            rcp (new lidToLidTable_type (tableKeys (), tableLids ()));
         }
       }
       else {
@@ -881,8 +894,8 @@ namespace Tpetra {
           // ownedPidLidPairs[curLID].size() > 1.  In that case, we
           // will use the TieBreak object to pick exactly one pair.
           Array<std::vector<std::pair<int, LO> > > ownedPidLidPairs (dir_numMyEntries);
-          size_type importIndex = 0;
-          for (size_type i = 0; i < static_cast<size_type> (numReceives); ++i) {
+          size_t importIndex = 0;
+          for (size_t i = 0; i < numReceives; ++i) {
             const GO  GID = importElements[importIndex++];
             const int PID = importElements[importIndex++];
             const LO  LID = importElements[importIndex++];
@@ -1098,7 +1111,7 @@ namespace Tpetra {
       //    global_size_t >= size_t >= int
       //    global_size_t >= size_t >= LO
       // Therefore, we can safely store all of these in a global_size_t
-      Array<global_size_t> exports (packetSize * numSends);
+      Kokkos::View<global_size_t*, Kokkos::HostSpace> exports("exports", packetSize * numSends);
       {
         // Packet format:
         // - If computing LIDs: (GID, PID, LID)
@@ -1111,7 +1124,7 @@ namespace Tpetra {
         // sendGIDs[k] in exports[2*k], exports[2*k+1].  If sending
         // triples, we pack the (GID, PID, LID) pair for gid =
         // sendGIDs[k] in exports[3*k, 3*k+1, 3*k+2].
-        size_type exportsIndex = 0;
+        size_t exportsIndex = 0;
 
         if (useHashTables_) {
           if (verbose) {
@@ -1167,7 +1180,7 @@ namespace Tpetra {
         }
 
         TEUCHOS_TEST_FOR_EXCEPTION
-          (exportsIndex > exports.size (), std::logic_error,
+          (exportsIndex > exports.size(), std::logic_error,
            funcPrefix << "On Process " << comm->getRank () << ", "
            "exportsIndex = " << exportsIndex << " > exports.size() = "
            << exports.size () << "." << errSuffix);
@@ -1203,7 +1216,7 @@ namespace Tpetra {
           "Please report this bug to the Tpetra developers.");
       }
 
-      Array<global_size_t> imports (packetSize * distor.getTotalReceiveLength ());
+      Kokkos::View<global_size_t*, Kokkos::HostSpace> imports("imports", packetSize * distor.getTotalReceiveLength());
       // FIXME (mfh 20 Mar 2014) One could overlap the sort2() below
       // with communication, by splitting this call into doPosts and
       // doWaits.  The code is still correct in this form, however.
@@ -1215,7 +1228,7 @@ namespace Tpetra {
         os << "}" << endl;
         cerr << os.str ();
       }
-      distor.doPostsAndWaits (exports ().getConst (), packetSize, imports ());
+      distor.doPostsAndWaits(exports, packetSize, imports);
       if (verbose) {
         std::ostringstream os;
         os << *procPrefix << "doPostsAndWaits result: ";

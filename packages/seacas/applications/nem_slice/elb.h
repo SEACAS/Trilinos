@@ -1,36 +1,9 @@
 /*
- * Copyright (C) 2009-2017 National Technology & Engineering Solutions of
- * Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
+ * Copyright(C) 1999-2020 National Technology & Engineering Solutions
+ * of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
  * NTESS, the U.S. Government retains certain rights in this software.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *
- *     * Neither the name of NTESS nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * See packages/seacas/LICENSE for details
  */
 
 #ifndef _EXOIILB_CONST_H_
@@ -43,9 +16,9 @@
 #include <vector>
 
 #define ELB_VERSION "4.19"
-#define UTIL_NAME "nem_slice"
-#define ELB_FALSE 0
-#define ELB_TRUE 1
+#define UTIL_NAME   "nem_slice"
+#define ELB_FALSE   0
+#define ELB_TRUE    1
 
 /* Macro for maximum value */
 #ifndef MAX
@@ -57,10 +30,10 @@
  * values, the more memory-efficient the code will be. Larger values
  * will likely speed execution and prevent swap thrashing.
  */
-#define SURND_ALLOC 8
-#define ADJ_ALLOC 8
+#define SURND_ALLOC    8
+#define ADJ_ALLOC      8
 #define MEM_CHUNK_SIZE 16 /* Value MUST be >= 2 */
-#define MEM_GROWTH 1.5
+#define MEM_GROWTH     1.5
 
 #define MAX_INP_LINE 10240
 
@@ -124,7 +97,7 @@ template <typename INT> struct LB_Description
   std::vector<std::vector<INT>>              e_cmap_procs;
   std::vector<std::vector<INT>>              e_cmap_neigh;
 
-  LB_Description() {}
+  LB_Description() = default;
 };
 
 /* Structure for the problem description. */
@@ -148,12 +121,12 @@ struct Problem_Description
   int   no_sph{-1};
   int   fix_columns{0}; /* detect, fix vertical column partitioning */
   char *groups{nullptr};
-  int * group_no{nullptr};
+  int  *group_no{nullptr};
   int   num_groups{-1};
   int   int64db{0};  /* integer types for output mesh database */
   int   int64api{0}; /* integer types for exodus api calls */
 
-  Problem_Description() {}
+  Problem_Description() = default;
 };
 
 /* Structure for parameters needed for the Eigensolver in Chaco */
@@ -163,7 +136,7 @@ struct Solver_Description
   int    rqi_flag{-1};
   int    vmax{-1};
 
-  Solver_Description() {}
+  Solver_Description() = default;
 };
 
 /* Structure used to store information about the weighting scheme, if
@@ -192,7 +165,7 @@ template <typename INT> struct Weight_Description
   std::vector<int>   vertices{};
   std::vector<float> edges{};
 
-  Weight_Description<INT>() {}
+  Weight_Description<INT>() = default;
 };
 
 /* Structure used to store information about the FEM mesh */
@@ -211,9 +184,9 @@ template <typename INT> struct Mesh_Description
   size_t              max_np_elem{0};
   size_t              ns_list_len{0};
   char                title[MAX_LINE_LENGTH + 1]{};
-  float *             coords{nullptr};
-  E_Type *            elem_type{nullptr};
-  INT **              connect;
+  float              *coords{nullptr};
+  E_Type             *elem_type{nullptr};
+  INT               **connect;
 
   Mesh_Description() : connect(nullptr) {}
 };
@@ -222,11 +195,11 @@ template <typename INT> struct Mesh_Description
 struct Sphere_Info
 {
   size_t num{0};
-  int *  adjust{nullptr};
-  int *  begin{nullptr};
-  int *  end{nullptr};
+  int   *adjust{nullptr};
+  int   *begin{nullptr};
+  int   *end{nullptr};
 
-  Sphere_Info() {}
+  Sphere_Info() = default;
 };
 
 /* Structure used to store various information about the graph */
@@ -237,49 +210,49 @@ template <typename INT> struct Graph_Description
   std::vector<INT>              adj{};
   std::vector<INT>              start{};
   std::vector<std::vector<INT>> sur_elem;
-  Graph_Description<INT>() {}
+  Graph_Description<INT>() = default;
 };
 
 /* Various constants */
-#define NODAL 0
+#define NODAL     0
 #define ELEMENTAL 1
 
 #define UTIL_NAME "nem_slice"
 
 /* Load balance types */
-#define MULTIKL 0
-#define SPECTRAL 1
-#define INERTIAL 2
-#define LINEAR 3
-#define RANDOM 4
-#define SCATTERED 5
-#define INFILE 6
-#define KL_REFINE 7
-#define NO_REFINE 8
-#define NUM_SECTS 9
-#define CNCT_DOM 10
-#define OUTFILE 11
-#define ZPINCH 12
-#define BRICK 13
-#define ZOLTAN_RCB 14
-#define ZOLTAN_RIB 15
+#define MULTIKL     0
+#define SPECTRAL    1
+#define INERTIAL    2
+#define LINEAR      3
+#define RANDOM      4
+#define SCATTERED   5
+#define INFILE      6
+#define KL_REFINE   7
+#define NO_REFINE   8
+#define NUM_SECTS   9
+#define CNCT_DOM    10
+#define OUTFILE     11
+#define ZPINCH      12
+#define BRICK       13
+#define ZOLTAN_RCB  14
+#define ZOLTAN_RIB  15
 #define ZOLTAN_HSFC 16
-#define IGNORE_Z 17
+#define IGNORE_Z    17
 
 /* Machine types */
-#define MESH 0
-#define HCUBE 1
+#define MESH      0
+#define HCUBE     1
 #define HYPERCUBE 2
-#define CLUSTER 3
+#define CLUSTER   3
 
 /* Solver options */
-#define TOLER 0
+#define TOLER   0
 #define USE_RQI 1
-#define VMAX 2
+#define VMAX    2
 
 /* ISSUES options */
 
-#define LOCAL_ISSUES 0
+#define LOCAL_ISSUES  0
 #define GLOBAL_ISSUES 1
 
 /* Weighting options */
@@ -292,11 +265,11 @@ template <typename INT> struct Graph_Description
  * on the command line.
  */
 #define NO_WEIGHT 0
-#define READ_EXO 1
-#define EL_BLK 2
-#define VAR_INDX 3
-#define EDGE_WGT 4
+#define READ_EXO  1
+#define EL_BLK    2
+#define VAR_INDX  3
+#define EDGE_WGT  4
 #define TIME_INDX 5
-#define VAR_NAME 6
+#define VAR_NAME  6
 
 #endif /* _EXOIILB_CONST_H_ */

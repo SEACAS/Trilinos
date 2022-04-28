@@ -6,22 +6,8 @@
 // ****************************************************************************
 // @HEADER
 
-#include "Teuchos_UnitTestHarness.hpp"
-#include "Teuchos_XMLParameterListHelpers.hpp"
-#include "Teuchos_TimeMonitor.hpp"
-#include "Teuchos_DefaultComm.hpp"
+#include "Tempus_UnitTest_RK_Utils.hpp"
 
-#include "Thyra_VectorStdOps.hpp"
-
-#include "Tempus_StepperFactory.hpp"
-#include "Tempus_UnitTest_Utils.hpp"
-
-#include "../TestModels/SinCosModel.hpp"
-#include "../TestModels/VanDerPolModel.hpp"
-#include "../TestUtils/Tempus_ConvergenceTestUtils.hpp"
-
-#include <fstream>
-#include <vector>
 
 namespace Tempus_Unit_Test {
 
@@ -31,16 +17,17 @@ using Teuchos::rcp_const_cast;
 using Teuchos::rcp_dynamic_cast;
 using Teuchos::ParameterList;
 using Teuchos::sublist;
-using Teuchos::getParametersFromXmlFile;
-
-using Tempus::StepperFactory;
 
 
 // ************************************************************
 // ************************************************************
 TEUCHOS_UNIT_TEST(SDIRK_3Stage4thOrder, Default_Construction)
 {
-  testDIRKAccessorsFullConstruction("SDIRK 3 Stage 4th order");
+  auto stepper = rcp(new Tempus::StepperSDIRK_3Stage4thOrder<double>());
+  testDIRKAccessorsFullConstruction(stepper);
+
+  // Test stepper properties.
+  TEUCHOS_ASSERT(stepper->getOrder() == 4);
 }
 
 
@@ -57,7 +44,9 @@ TEUCHOS_UNIT_TEST(SDIRK_3Stage4thOrder, StepperFactory_Construction)
 // ************************************************************
 TEUCHOS_UNIT_TEST(SDIRK_3Stage4thOrder, AppAction)
 {
-  testRKAppAction("SDIRK 3 Stage 4th order", out, success);
+  auto stepper = rcp(new Tempus::StepperSDIRK_3Stage4thOrder<double>());
+  auto model = rcp(new Tempus_Test::SinCosModel<double>());
+  testRKAppAction(stepper, model, out, success);
 }
 
 

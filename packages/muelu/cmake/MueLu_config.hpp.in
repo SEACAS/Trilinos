@@ -55,15 +55,15 @@
 
 #cmakedefine HAVE_MUELU_KOKKOSCLASSIC
 
-#cmakedefine HAVE_MUELU_KOKKOSCONTAINERS
-
-#cmakedefine HAVE_MUELU_KOKKOSCORE
-
 #cmakedefine HAVE_MUELU_ML
 
 #cmakedefine HAVE_MUELU_PAMGEN
 
 #cmakedefine HAVE_MUELU_TEKO
+
+#cmakedefine HAVE_MUELU_THYRA
+
+#cmakedefine HAVE_MUELU_THYRATPETRAADAPTERS
 
 #cmakedefine HAVE_MUELU_TPETRA
 
@@ -74,7 +74,11 @@
 
 #cmakedefine HAVE_MUELU_ZOLTAN
 
-#cmakedefine HAVE_MUELU_ZOLTAN2
+#cmakedefine HAVE_MUELU_ZOLTAN2CORE
+#ifdef HAVE_MUELU_ZOLTAN2CORE
+#  define HAVE_MUELU_ZOLTAN2
+#endif
+
 
 /* Optional TPL */
 
@@ -108,6 +112,7 @@
 #cmakedefine HAVE_MUELU_SERIAL
 #cmakedefine HAVE_MUELU_OPENMP
 #cmakedefine HAVE_MUELU_CUDA
+#cmakedefine HAVE_MUELU_HIP
 
 #cmakedefine HAVE_MUELU_DEFAULT_GO_LONGLONG
 #cmakedefine HAVE_MUELU_DEFAULT_GO_LONG

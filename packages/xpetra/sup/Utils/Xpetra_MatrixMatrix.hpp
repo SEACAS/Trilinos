@@ -59,8 +59,6 @@
 #include "Xpetra_StridedMapFactory.hpp"
 #include "Xpetra_StridedMap.hpp"
 
-#include <execinfo.h>
-
 #ifdef HAVE_XPETRA_EPETRA
 #include <Xpetra_EpetraCrsMatrix_fwd.hpp>
 #endif
@@ -260,7 +258,7 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
           Bprime = Tpetra::importAndFillCompleteCrsMatrix<tcrs_matrix_type>(Bprime, *import, Aprime->getDomainMap(), Aprime->getRangeMap());
         }
         //Count the entries to allocate for C in each local row.
-        LO numLocalRows = Aprime->getNodeNumRows();
+        LO numLocalRows = Aprime->getLocalNumRows();
         Array<size_t> allocPerRow(numLocalRows);
         //0 is always the minimum LID
         for(LO i = 0; i < numLocalRows; i++)
@@ -268,7 +266,7 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
           allocPerRow[i] = Aprime->getNumEntriesInLocalRow(i) + Bprime->getNumEntriesInLocalRow(i);
         }
         //Construct C
-        RCP<tcrs_matrix_type> C = rcp(new tcrs_matrix_type(Aprime->getRowMap(), allocPerRow(), Tpetra::StaticProfile));
+        RCP<tcrs_matrix_type> C = rcp(new tcrs_matrix_type(Aprime->getRowMap(), allocPerRow()));
         //Compute the sum in C (already took care of transposes)
         Tpetra::MatrixMatrix::Add<SC,LO,GO,NO>(
             *Aprime, false, alpha,
@@ -662,6 +660,8 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
       @param transposeB indicate whether to use transpose of B
       @param beta       scalar multiplier for B, defaults to 1.0
       @param C          resulting sum
+      @param fos        output stream for printing to screen
+      @param AHasFixedNnzPerRow
 
       It is up to the caller to ensure that the resulting matrix sum is fillComplete'd.
       */
@@ -1347,6 +1347,8 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
       @param transposeB indicate whether to use transpose of B
       @param beta       scalar multiplier for B, defaults to 1.0
       @param C          resulting sum
+      @param fos        output stream for printing to screen
+      @param AHasFixedNnzPerRow
 
       It is up to the caller to ensure that the resulting matrix sum is fillComplete'd.
       */
@@ -1378,9 +1380,9 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
             size_t numLocalRows = 0;
             if (A.isFillComplete() && B.isFillComplete()) {
 
-              maxNzInA     = A.getNodeMaxNumRowEntries();
-              maxNzInB     = B.getNodeMaxNumRowEntries();
-              numLocalRows = A.getNodeNumRows();
+              maxNzInA     = A.getLocalMaxNumRowEntries();
+              maxNzInB     = B.getLocalMaxNumRowEntries();
+              numLocalRows = A.getLocalNumRows();
             }
 
             if (maxNzInA == 1 || maxNzInB == 1 || AHasFixedNnzPerRow) {
@@ -1403,7 +1405,7 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
 
             } else {
               // general case
-              LO maxPossibleNNZ = A.getNodeMaxNumRowEntries() + B.getNodeMaxNumRowEntries();
+              LO maxPossibleNNZ = A.getLocalMaxNumRowEntries() + B.getLocalMaxNumRowEntries();
               C = rcp(new Xpetra::CrsMatrixWrap<SC,LO,GO,NO>(A.getRowMap(), maxPossibleNNZ));
             }
             if (transposeB)
@@ -1931,6 +1933,8 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
       @param transposeB indicate whether to use transpose of B
       @param beta       scalar multiplier for B, defaults to 1.0
       @param C          resulting sum
+      @param fos        output stream for printing to screen
+      @param AHasFixedNnzPerRow
 
       It is up to the caller to ensure that the resulting matrix sum is fillComplete'd.
       */
@@ -1957,9 +1961,9 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
             size_t numLocalRows = 0;
             if (A.isFillComplete() && B.isFillComplete()) {
 
-              maxNzInA     = A.getNodeMaxNumRowEntries();
-              maxNzInB     = B.getNodeMaxNumRowEntries();
-              numLocalRows = A.getNodeNumRows();
+              maxNzInA     = A.getLocalMaxNumRowEntries();
+              maxNzInB     = B.getLocalMaxNumRowEntries();
+              numLocalRows = A.getLocalNumRows();
             }
 
             if (maxNzInA == 1 || maxNzInB == 1 || AHasFixedNnzPerRow) {
@@ -1982,7 +1986,7 @@ Note: this class is not in the Xpetra_UseShortNames.hpp
 
             } else {
               // general case
-              LO maxPossibleNNZ = A.getNodeMaxNumRowEntries() + B.getNodeMaxNumRowEntries();
+              LO maxPossibleNNZ = A.getLocalMaxNumRowEntries() + B.getLocalMaxNumRowEntries();
               C = rcp(new Xpetra::CrsMatrixWrap<SC,LO,GO,NO>(A.getRowMap(), maxPossibleNNZ));
             }
             if (transposeB)

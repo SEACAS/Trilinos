@@ -1,37 +1,10 @@
-// Copyright(C) 1999-2017 National Technology & Engineering Solutions
+// Copyright(C) 1999-2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
-#ifndef IOSS_Ioss_ParallelUtils_h
-#define IOSS_Ioss_ParallelUtils_h
+#pragma once
 
 #include <Ioss_CodeTypes.h> // for Int64Vector, IntVector
 #include <Ioss_Utils.h>
@@ -39,6 +12,10 @@
 #include <cstddef> // for size_t
 #include <string>  // for string
 #include <vector>  // for vector
+#if IOSS_DEBUG_OUTPUT
+#include <fmt/format.h>
+#include <fmt/ostream.h>
+#endif
 
 #ifdef SEACAS_HAVE_MPI
 #include <Ioss_SerializeIO.h>
@@ -49,7 +26,8 @@ namespace Ioss {
   class ParallelUtils
   {
   public:
-    explicit ParallelUtils(MPI_Comm the_communicator);
+    ParallelUtils() = default;
+    explicit ParallelUtils(Ioss_MPI_Comm the_communicator);
     ~ParallelUtils() = default;
 
     // Assignment operator
@@ -57,13 +35,15 @@ namespace Ioss {
 
     enum MinMax { DO_MAX, DO_MIN, DO_SUM };
 
-    /*!
-     * Returns 'true' if 'name' is defined in the environment.
-     * The value of the environment variable is returned in 'value'.
-     * getenv system call is only done on processor 0.
-     * If '!sync_parallel', then don't push to other processors.
-     */
-    bool get_environment(const std::string &name, std::string &value, bool sync_parallel) const;
+#if defined(SEACAS_HAVE_MPI)
+    static Ioss_MPI_Comm comm_world() { return (Ioss_MPI_Comm)MPI_COMM_WORLD; }
+    static Ioss_MPI_Comm comm_self() { return (Ioss_MPI_Comm)MPI_COMM_SELF; }
+    static Ioss_MPI_Comm comm_null() { return (Ioss_MPI_Comm)MPI_COMM_NULL; }
+#else
+    static constexpr Ioss_MPI_Comm comm_world() { return (Ioss_MPI_Comm)0; }
+    static constexpr Ioss_MPI_Comm comm_self() { return (Ioss_MPI_Comm)0; }
+    static constexpr Ioss_MPI_Comm comm_null() { return (Ioss_MPI_Comm)0; }
+#endif
 
     /*!
      * See if any external properties specified via the
@@ -74,12 +54,19 @@ namespace Ioss {
 
     /*!
      * Returns 'true' if 'name' is defined in the environment.
-     * The value of the environment variable is converted to an
-     * integer via the atoi library call and returned in 'value'.
-     * No checking is done to ensure that the environment variable
-     * points to a valid integer.
+     * The value of the environment variable is returned in 'value'.
      * getenv system call is only done on processor 0.
      * If '!sync_parallel', then don't push to other processors.
+     */
+    bool get_environment(const std::string &name, std::string &value, bool sync_parallel) const;
+
+    /*!
+     * Returns 'true' if 'name' is defined in the environment.  The
+     * value of the environment variable is converted to an integer
+     * and returned in 'value'.  No checking is done to ensure that
+     * the environment variable points to a valid integer.  getenv
+     * system call is only done on processor 0.  If '!sync_parallel',
+     * then don't push to other processors.
      */
     bool get_environment(const std::string &name, int &value, bool sync_parallel) const;
 
@@ -93,7 +80,7 @@ namespace Ioss {
 
     std::string decode_filename(const std::string &filename, bool is_parallel) const;
 
-    MPI_Comm communicator() const { return communicator_; }
+    Ioss_MPI_Comm communicator() const { return communicator_; }
     int      parallel_size() const;
     int      parallel_rank() const;
 
@@ -142,27 +129,33 @@ namespace Ioss {
     int gather(int vals_count, int size_per_val, std::vector<T> &my_values,
                std::vector<T> &result) const;
 
+    template <typename T> void broadcast(T &value, int root = 0) const;
+    template <typename T> void broadcast(std::vector<T> &value, int root = 0) const;
+
     void progress(const std::string &output) const;
 
   private:
-    MPI_Comm communicator_;
+    Ioss_MPI_Comm communicator_{comm_world()};
+    mutable int   parallelSize_{-1};
+    mutable int   parallelRank_{-1};
   };
 
 #ifdef SEACAS_HAVE_MPI
   inline MPI_Datatype mpi_type(double /*dummy*/) { return MPI_DOUBLE; }
   inline MPI_Datatype mpi_type(float /*dummy*/) { return MPI_FLOAT; }
   inline MPI_Datatype mpi_type(int /*dummy*/) { return MPI_INT; }
-  inline MPI_Datatype mpi_type(char /*dummy*/) { return MPI_CHAR; }
   inline MPI_Datatype mpi_type(long int /*dummy*/) { return MPI_LONG_LONG_INT; }
   inline MPI_Datatype mpi_type(long long int /*dummy*/) { return MPI_LONG_LONG_INT; }
   inline MPI_Datatype mpi_type(unsigned int /*dummy*/) { return MPI_UNSIGNED; }
   inline MPI_Datatype mpi_type(unsigned long int /*dummy*/) { return MPI_UNSIGNED_LONG; }
+  inline MPI_Datatype mpi_type(unsigned long long int /*dummy*/) { return MPI_UNSIGNED_LONG_LONG; }
+  inline MPI_Datatype mpi_type(char /*dummy*/) { return MPI_CHAR; }
 
   template <typename T>
   int MY_Alltoallv64(const std::vector<T> &sendbuf, const std::vector<int64_t> &sendcounts,
                      const std::vector<int64_t> &senddisp, std::vector<T> &recvbuf,
                      const std::vector<int64_t> &recvcounts, const std::vector<int64_t> &recvdisp,
-                     MPI_Comm comm)
+                     Ioss_MPI_Comm comm)
   {
     int processor_count = 0;
     int my_processor    = 0;
@@ -180,8 +173,7 @@ namespace Ioss {
                << sendcounts[i]
                << "\n       which exceeds the storage capacity of the integers "
                   "used by MPI functions.\n";
-        std::cerr << errmsg.str();
-        exit(EXIT_FAILURE);
+        IOSS_ERROR(errmsg);
       }
     }
 
@@ -222,7 +214,7 @@ namespace Ioss {
   int MY_Alltoallv(const std::vector<T> &sendbuf, const std::vector<int64_t> &sendcnts,
                    const std::vector<int64_t> &senddisp, std::vector<T> &recvbuf,
                    const std::vector<int64_t> &recvcnts, const std::vector<int64_t> &recvdisp,
-                   MPI_Comm comm)
+                   Ioss_MPI_Comm comm)
   {
 // Wrapper to handle case where send/recv counts and displacements are 64-bit integers.
 // Two cases:
@@ -230,6 +222,21 @@ namespace Ioss {
 //    -- if (sendcnts[#proc-1] + senddisp[#proc-1] < 2^31, then we are ok
 // 2) They are of type 64-bit integers, and storing data in the 64-bit integer range.
 //    -- call special alltoallv which does point-to-point sends
+#if IOSS_DEBUG_OUTPUT
+    {
+      Ioss::ParallelUtils utils(comm);
+      int                 processor_count = utils.parallel_size();
+
+      int              max_comm = sendcnts[processor_count - 1] + senddisp[processor_count - 1];
+      std::vector<int> comm_size;
+
+      utils.gather(max_comm, comm_size);
+      int my_rank = utils.parallel_rank();
+      if (my_rank == 0) {
+        fmt::print("Send Communication Size: {}\n", fmt::join(comm_size, ", "));
+      }
+    }
+#endif
 #if 1
     int processor_count = 0;
     MPI_Comm_size(comm, &processor_count);
@@ -261,8 +268,23 @@ namespace Ioss {
   int MY_Alltoallv(const std::vector<T> &sendbuf, const std::vector<int> &sendcnts,
                    const std::vector<int> &senddisp, std::vector<T> &recvbuf,
                    const std::vector<int> &recvcnts, const std::vector<int> &recvdisp,
-                   MPI_Comm comm)
+                   Ioss_MPI_Comm comm)
   {
+#if IOSS_DEBUG_OUTPUT
+    {
+      Ioss::ParallelUtils utils(comm);
+      int                 processor_count = utils.parallel_size();
+
+      int              max_comm = sendcnts[processor_count - 1] + senddisp[processor_count - 1];
+      std::vector<int> comm_size;
+
+      utils.gather(max_comm, comm_size);
+      int my_rank = utils.parallel_rank();
+      if (my_rank == 0) {
+        fmt::print("Send Communication Size: {}\n", fmt::join(comm_size, ", "));
+      }
+    }
+#endif
     return MPI_Alltoallv((void *)sendbuf.data(), const_cast<int *>(sendcnts.data()),
                          const_cast<int *>(senddisp.data()), mpi_type(T(0)), recvbuf.data(),
                          const_cast<int *>(recvcnts.data()), const_cast<int *>(recvdisp.data()),
@@ -312,4 +334,3 @@ namespace Ioss {
   }
 
 } // namespace Ioss
-#endif

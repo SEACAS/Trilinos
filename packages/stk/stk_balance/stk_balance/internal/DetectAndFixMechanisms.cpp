@@ -11,8 +11,6 @@
 #include <stk_mesh/base/GetEntities.hpp>
 #include "stk_util/parallel/CommSparse.hpp"
 
-#include <stk_tools/mesh_tools/CustomAura.hpp>
-
 namespace stk { namespace balance { namespace internal {
 
 void translate_data_for_dsd_detection(const Zoltan2ParallelGraph &zoltan2Graph, const stk::mesh::BulkData& bulk, const stk::mesh::impl::LocalIdMapper& localIds,
@@ -29,11 +27,10 @@ std::vector<int> get_components_to_move(const stk::mesh::BulkData& bulk, const s
 
 bool detectAndFixMechanisms(const stk::balance::BalanceSettings& graphSettings, stk::mesh::BulkData &bulk)
 {
-    stk::mesh::Ghosting * customAura = stk::tools::create_custom_aura(bulk, bulk.mesh_meta_data().globally_shared_part(), "customAura");
     stk::mesh::impl::LocalIdMapper localIds(bulk, stk::topology::ELEM_RANK);
 
     Zoltan2ParallelGraph zoltan2Graph;
-    fill_zoltan2_parallel_graph(bulk, graphSettings, localIds, zoltan2Graph);
+    fill_zoltan2_parallel_graph(bulk, graphSettings, zoltan2Graph);
 
     std::vector<BalanceLocalNumber> tmpOffsets;
     std::vector<BalanceGlobalNumber> tmpAdj;
@@ -59,17 +56,16 @@ bool detectAndFixMechanisms(const stk::balance::BalanceSettings& graphSettings, 
         move_components(zoltan2Graph, localIds, bulk, elementsPerComponent, componentsToMove);
     }
 
-    stk::tools::destroy_custom_aura(bulk, customAura);
-
     return globallyHaveMechanisms;
 }
 
 
-void fill_zoltan2_parallel_graph(stk::mesh::BulkData& bulk, const stk::balance::BalanceSettings& graphSettings, const stk::mesh::impl::LocalIdMapper& localIds, Zoltan2ParallelGraph &zoltan2Graph)
+void fill_zoltan2_parallel_graph(stk::mesh::BulkData& bulk, const stk::balance::BalanceSettings& graphSettings,
+                                 Zoltan2ParallelGraph &zoltan2Graph)
 {
-    stk::mesh::Selector sel = bulk.mesh_meta_data().locally_owned_part();
+    stk::mesh::Selector sel = bulk.mesh_meta_data().universal_part();
     zoltan2Graph.setMechanismCheckFlag();
-    stk::balance::internal::createZoltanParallelGraph(graphSettings, bulk, std::vector<stk::mesh::Selector>{sel}, localIds, zoltan2Graph);
+    stk::balance::internal::createZoltanParallelGraph(bulk, sel, bulk.parallel(), graphSettings, zoltan2Graph);
 }
 
 size_t one_based(size_t input)
@@ -128,8 +124,9 @@ std::vector<stk::mesh::EntityVector> get_elements_per_component(const stk::mesh:
 
     std::vector<stk::mesh::EntityVector> elementsPerComponent(num_dsd);
 
+    const bool sortById = true;
     stk::mesh::EntityVector elements;
-    stk::mesh::get_selected_entities(bulk.mesh_meta_data().locally_owned_part(), bulk.buckets(stk::topology::ELEM_RANK), elements);
+    stk::mesh::get_entities(bulk, stk::topology::ELEM_RANK, bulk.mesh_meta_data().locally_owned_part(), elements, sortById);
 
     for(size_t i=0;i<list_ptr.size()-1;++i)
     {
@@ -286,7 +283,7 @@ stk::mesh::EntityProcVec get_element_proc_movement(const stk::mesh::BulkData& bu
                     if(iter == otherElementsOnTheMove.end())
                     {
                         std::vector<int> procs;
-                        bulk.comm_procs(bulk.entity_key(otherElement), procs);
+                        bulk.comm_procs(otherElement, procs);
                         ThrowRequireWithSierraHelpMsg(procs.size()>0);
                         destProcForComp = procs[0];
                         break;
@@ -337,7 +334,7 @@ std::set<stk::mesh::EntityProc> get_element_proc_info(const stk::mesh::BulkData&
                 if(bulk.is_valid(otherElement) && !bulk.bucket(otherElement).owned())
                 {
                     std::vector<int> procs;
-                    bulk.comm_procs(bulk.entity_key(otherElement), procs);
+                    bulk.comm_procs(otherElement, procs);
                     for(size_t m=0;m<procs.size();++m)
                     {
                         entityProcs.insert(stk::mesh::EntityProc(element, procs[m]));

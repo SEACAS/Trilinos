@@ -6,7 +6,6 @@
 #include <stk_mesh/baseImpl/elementGraph/ElemElemGraph.hpp>
 #include <stk_mesh/baseImpl/elementGraph/ElemElemGraphUpdater.hpp>
 #include <stk_unit_test_utils/MeshFixture.hpp>
-#include <stk_util/parallel/ParallelReduce.hpp>
 #include <stk_mesh/base/SkinBoundary.hpp>
 
 namespace
@@ -235,7 +234,7 @@ TEST_F(HexShellShell, SideConnections)
         setup_hex_shell_shell_on_procs({0, 0, 0});
 
         stk::mesh::ElemElemGraph elemElemGraph(get_bulk());
-        stk::mesh::SideConnector sideConnector = elemElemGraph.get_side_connector();
+        stk::mesh::SideConnector& sideConnector = elemElemGraph.get_side_connector();
 
         get_bulk().modification_begin();
         stk::mesh::Entity shell2 = get_bulk().get_entity(stk::topology::ELEM_RANK, 2);
@@ -514,7 +513,7 @@ protected:
     {
         elemElemGraph = new ElemElemGraphTester(get_bulk());
         updater = std::make_shared<stk::mesh::ElemElemGraphUpdater>(get_bulk(), *elemElemGraph);
-        get_bulk().register_observer(updater);
+        get_bulk().register_observer(updater, stk::mesh::ModificationObserverPriority::STK_INTERNAL);
         coincident_graph = &elemElemGraph->my_get_coincident_graph();
     }
 

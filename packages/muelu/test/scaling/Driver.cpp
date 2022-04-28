@@ -219,7 +219,7 @@ int main_(Teuchos::CommandLineProcessor &clp, Xpetra::UnderlyingLib& lib, int ar
   bool        printTimings      = true;               clp.setOption("timings", "notimings",  &printTimings,      "print timings to screen");
   std::string timingsFormat     = "table-fixed";      clp.setOption("time-format",           &timingsFormat,     "timings format (table-fixed | table-scientific | yaml)");
   int         writeMatricesOPT  = -2;                 clp.setOption("write",                 &writeMatricesOPT,  "write matrices to file (-1 means all; i>=0 means level i)");
-  std::string dsolveType        = "belos", solveType; clp.setOption("solver",                &dsolveType,        "solve type: (none | cg | gmres | standalone | matvec)");
+  std::string dsolveType        = "belos", solveType; clp.setOption("solver",                &dsolveType,        "solve type: (none | belos | standalone | matvec)");
   std::string belosType         = "cg";               clp.setOption("belosType",             &belosType,         "belos solver type: (Pseudoblock CG | Block CG | Pseudoblock GMRES | Block GMRES | ...) see BelosSolverFactory.hpp for exhaustive list of solvers");
   double      dtol              = 1e-12, tol;         clp.setOption("tol",                   &dtol,              "solver convergence tolerance");
   bool        binaryFormat      = false;              clp.setOption("binary", "ascii",       &binaryFormat,      "print timings to screen");
@@ -230,15 +230,18 @@ int main_(Teuchos::CommandLineProcessor &clp, Xpetra::UnderlyingLib& lib, int ar
   std::string rangeMapFile;                           clp.setOption("rangemap",              &rangeMapFile,      "rangemap data file");
   std::string matrixFile;                             clp.setOption("matrix",                &matrixFile,        "matrix data file");
   std::string rhsFile;                                clp.setOption("rhs",                   &rhsFile,           "rhs data file");
+  std::string solFile;                                clp.setOption("sol",                   &solFile,           "write the solution to this file");
   std::string coordFile;                              clp.setOption("coords",                &coordFile,         "coordinates data file");
+  std::string coordMapFile;                           clp.setOption("coordsmap",             &coordMapFile,      "coordinates map data file");
   std::string nullFile;                               clp.setOption("nullspace",             &nullFile,          "nullspace data file");
   std::string materialFile;                           clp.setOption("material",              &materialFile,      "material data file");
+  bool        setNullSpace      = true;               clp.setOption("driver-nullspace","muelu-computed-nullspace", &setNullSpace, "driver sets nullspace");
   int         numRebuilds       = 0;                  clp.setOption("rebuild",               &numRebuilds,       "#times to rebuild hierarchy");
   int         numResolves       = 0;                  clp.setOption("resolve",               &numResolves,       "#times to redo solve");
   int         maxIts            = 200;                clp.setOption("its",                   &maxIts,            "maximum number of solver iterations");
   int         numVectors        = 1;                  clp.setOption("multivector",           &numVectors,        "number of rhs to solve simultaneously");
   bool        scaleResidualHist = true;               clp.setOption("scale", "noscale",      &scaleResidualHist, "scaled Krylov residual history");
-  bool        solvePreconditioned = true;             clp.setOption("solve-preconditioned","no-solve-preconditioned", &solvePreconditioned, "use MueLu preconditioner in solve");  
+  bool        solvePreconditioned = true;             clp.setOption("solve-preconditioned","no-solve-preconditioned", &solvePreconditioned, "use MueLu preconditioner in solve");
   bool        useStackedTimer   = false;              clp.setOption("stacked-timer","no-stacked-timer", &useStackedTimer, "use stacked timer");
 
 #ifdef HAVE_MUELU_TPETRA
@@ -306,8 +309,18 @@ MueLu::MueLu_AMGX_initialize_plugins();
       if (paramList.isParameter(name))
         realParams.setEntry(name, paramList.getEntry(name));
     }
-  }
 
+    // Galeri updates (only works with Run1)
+    if(paramList.sublist("Run1").isSublist("Galeri")) {
+      ParameterList& moreParams = paramList.sublist("Run1").sublist("Galeri");
+      for (ParameterList::ConstIterator it = moreParams.begin(); it != moreParams.end(); it++) {
+        const std::string& name = moreParams.name(it);
+        if (moreParams.isParameter(name))
+          realParams.setEntry(name, moreParams.getEntry(name));
+      }
+    }
+  }
+  
 #ifdef HAVE_MPI
   // Generate the node-level communicator, if we want one
   Teuchos::RCP<const Teuchos::Comm<int> > nodeComm;
@@ -335,12 +348,17 @@ MueLu::MueLu_AMGX_initialize_plugins();
 
   comm->barrier();
   Teuchos::RCP<Teuchos::StackedTimer> stacked_timer;
+  //Constructing the globalTimeMonitor should only be done if not using StackedTimer.
+  //This is because if a StackedTimer is already active, globalTimer will be become a sub-timer of the root.
+  RCP<TimeMonitor> globalTimeMonitor = Teuchos::null;
   if(useStackedTimer)
+  {
     stacked_timer = rcp(new Teuchos::StackedTimer("MueLu_Driver"));
-  Teuchos::TimeMonitor::setStackedTimer(stacked_timer);
-
-  RCP<TimeMonitor> globalTimeMonitor = rcp(new TimeMonitor(*TimeMonitor::getNewTimer("Driver: S - Global Time")));
-  RCP<TimeMonitor> tm                = rcp(new TimeMonitor(*TimeMonitor::getNewTimer("Driver: 1 - Matrix Build")));
+    Teuchos::TimeMonitor::setStackedTimer(stacked_timer);
+  }
+  else
+    globalTimeMonitor = rcp(new TimeMonitor(*TimeMonitor::getNewTimer("Driver: S - Global Time")));
+  RCP<TimeMonitor> tm = rcp(new TimeMonitor(*TimeMonitor::getNewTimer("Driver: 1 - Matrix Build")));
 
 
   RCP<Matrix>      A;
@@ -350,7 +368,7 @@ MueLu::MueLu_AMGX_initialize_plugins();
   RCP<MultiVector> X, B;
 
   // Load the matrix off disk (or generate it via Galeri)
-  MatrixLoad<SC,LO,GO,NO>(comm,lib,binaryFormat,matrixFile,rhsFile,rowMapFile,colMapFile,domainMapFile,rangeMapFile,coordFile,nullFile,materialFile,map,A,coordinates,nullspace,material,X,B,numVectors,galeriParameters,xpetraParameters,galeriStream);
+  MatrixLoad<SC,LO,GO,NO>(comm,lib,binaryFormat,matrixFile,rhsFile,rowMapFile,colMapFile,domainMapFile,rangeMapFile,coordFile,coordMapFile,nullFile,materialFile,map,A,coordinates,nullspace,material,X,B,numVectors,galeriParameters,xpetraParameters,galeriStream);
   comm->barrier();
   tm = Teuchos::null;
 
@@ -459,7 +477,7 @@ MueLu::MueLu_AMGX_initialize_plugins();
         comm->barrier();
         // Build the preconditioner numRebuilds+1 times
         MUELU_SWITCH_TIME_MONITOR(tm,"Driver: 2 - MueLu Setup");
-        PreconditionerSetup(A,coordinates,nullspace,material,mueluList,profileSetup,useAMGX,useML,numRebuilds,H,Prec);
+        PreconditionerSetup(A,coordinates,nullspace,material,mueluList,profileSetup,useAMGX,useML,setNullSpace,numRebuilds,H,Prec);
 
         comm->barrier();
         tm = Teuchos::null;
@@ -514,10 +532,11 @@ MueLu::MueLu_AMGX_initialize_plugins();
         const std::string filter = "";
 
         if (useStackedTimer) {
+          stacked_timer->stopBaseTimer();
           Teuchos::StackedTimer::OutputOptions options;
           options.output_fraction = options.output_histogram = options.output_minmax = true;
           stacked_timer->report(out2, comm, options);
-          auto xmlOut = stacked_timer->reportWatchrXML(std::string("MueLuDriver") + std::to_string(comm->getSize()), comm);
+          auto xmlOut = stacked_timer->reportWatchrXML(std::string("MueLu Setup-Solve ") + std::to_string(comm->getSize()) + " ranks", comm);
           if(xmlOut.length())
             std::cout << "\nAlso created Watchr performance report " << xmlOut << '\n';
         }
@@ -555,6 +574,10 @@ MueLu::MueLu_AMGX_initialize_plugins();
 
 
   }//end reruns
+
+  if (solFile != "")
+    Xpetra::IO<SC,LO,GO,Node>::Write(solFile, *X);
+
 
 #ifdef HAVE_MUELU_AMGX
 // Finalize AMGX

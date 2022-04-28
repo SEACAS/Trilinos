@@ -1,36 +1,9 @@
 /*
- * Copyright (c) 2005-2017, 2020 National Technology & Engineering Solutions
+ * Copyright(C) 1999-2020 National Technology & Engineering Solutions
  * of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
  * NTESS, the U.S. Government retains certain rights in this software.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *
- *     * Neither the name of NTESS nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * See packages/seacas/LICENSE for details
  */
 
 #include <cstdio>
@@ -45,7 +18,7 @@
 #include "exodusII_int.h"
 
 #define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
+#define TOSTRING(x)  STRINGIFY(x)
 #define EXCHECK(funcall)                                                                           \
   do {                                                                                             \
     if ((error = (funcall)) != NC_NOERR) {                                                         \
@@ -166,7 +139,7 @@ int main()
   coord_names[1] = "ycoor";
   coord_names[2] = "zcoor";
 
-  EXCHECK(ex_put_coord_names(exoid, (char **)coord_names));
+  EXCHECK(ex_put_coord_names(exoid, (char *const *)coord_names));
 
   std::vector<ex_block> blocks(num_elem_blk);
 
@@ -226,12 +199,12 @@ int main()
 
   /* write information records; test empty and just blank-filled records */
   constexpr int num_info = 3;
-  const char *  info[3];
+  const char   *info[3];
   info[0] = "This is the first information record.";
   info[1] = "";
   info[2] = "                                     ";
 
-  EXCHECK(ex_put_info(exoid, num_info, (char **)info));
+  EXCHECK(ex_put_info(exoid, num_info, (char *const *)info));
 
   /* write results variables parameters and names */
   const int num_glo_vars = 1;
@@ -240,7 +213,7 @@ int main()
   var_names[0] = "glo_vars";
 
   EXCHECK(ex_put_variable_param(exoid, EX_GLOBAL, num_glo_vars));
-  EXCHECK(ex_put_variable_names(exoid, EX_GLOBAL, num_glo_vars, (char **)var_names));
+  EXCHECK(ex_put_variable_names(exoid, EX_GLOBAL, num_glo_vars, (char *const *)var_names));
 
   const int num_nod_vars = 2;
   /*              12345678901234567890123456789012 */
@@ -248,7 +221,7 @@ int main()
   var_names[1] = "nod_var1";
 
   EXCHECK(ex_put_variable_param(exoid, EX_NODAL, num_nod_vars));
-  EXCHECK(ex_put_variable_names(exoid, EX_NODAL, num_nod_vars, (char **)var_names));
+  EXCHECK(ex_put_variable_names(exoid, EX_NODAL, num_nod_vars, (char *const *)var_names));
 
   const int num_ele_vars = 3;
   /*              0        1         2         3   */
@@ -258,7 +231,7 @@ int main()
   var_names[2] = "this_variable_name_is_tooooo_long";
 
   EXCHECK(ex_put_variable_param(exoid, EX_ELEM_BLOCK, num_ele_vars));
-  EXCHECK(ex_put_variable_names(exoid, EX_ELEM_BLOCK, num_ele_vars, (char **)var_names));
+  EXCHECK(ex_put_variable_names(exoid, EX_ELEM_BLOCK, num_ele_vars, (char *const *)var_names));
 
   // for each time step, write the analysis results;
   // the code below fills the arrays glob_var_vals,

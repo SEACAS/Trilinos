@@ -96,10 +96,10 @@ void KokkosSPGEMM
 	{
 		nnz_lno_t maxNumRoughZeros = 0;
 		size_t overall_flops = 0;
-		Kokkos::Impl::Timer timer1;
+		Kokkos::Timer timer1;
 		auto new_row_mapB_begin = Kokkos::subview (row_mapB, std::make_pair (nnz_lno_t(0), b_row_cnt));
 		auto new_row_mapB_end = Kokkos::subview (row_mapB, std::make_pair (nnz_lno_t(1), b_row_cnt + 1));
-		row_lno_persistent_work_view_t flops_per_row(Kokkos::ViewAllocateWithoutInitializing("origianal row flops"), a_row_cnt);
+		row_lno_persistent_work_view_t flops_per_row(Kokkos::view_alloc(Kokkos::WithoutInitializing, "original row flops"), a_row_cnt);
 
 		//get maximum row flops.
 		maxNumRoughZeros = this->getMaxRoughRowNNZ(a_row_cnt, row_mapA, entriesA,
@@ -121,23 +121,21 @@ void KokkosSPGEMM
     //number of rows and nnzs
     nnz_lno_t n = this->row_mapB.extent(0) - 1;
     size_type nnz = this->entriesB.extent(0);
-    KokkosKernels::Impl::ExecSpaceType my_exec_space_ = KokkosKernels::Impl::get_exec_space_type<MyExecSpace>();
 
     bool compress_in_single_step = this->handle->get_spgemm_handle()->get_compression_step();
-    //compress in single step if it is cuda execution space.
-    if (my_exec_space_ == KokkosKernels::Impl::Exec_CUDA) {
+    //compress in single step if it is GPU.
+    if (KokkosKernels::Impl::kk_is_gpu_exec_space<MyExecSpace>())
     	compress_in_single_step = true;
-    }
 
     //compressed B fields.
-    row_lno_temp_work_view_t new_row_mapB(Kokkos::ViewAllocateWithoutInitializing("new row map"), n+1);
+    row_lno_temp_work_view_t new_row_mapB(Kokkos::view_alloc(Kokkos::WithoutInitializing, "new row map"), n+1);
     row_lno_temp_work_view_t new_row_mapB_begins;
 
     nnz_lno_temp_work_view_t set_index_entries; //will be output of compress matrix.
     nnz_lno_temp_work_view_t set_entries; //will be output of compress matrix
 
     //First Compress B.
-    Kokkos::Impl::Timer timer1;
+    Kokkos::Timer timer1;
 
     if (KOKKOSKERNELS_VERBOSE){
       std::cout << "\tCOMPRESS MATRIX-B PHASE" << std::endl;

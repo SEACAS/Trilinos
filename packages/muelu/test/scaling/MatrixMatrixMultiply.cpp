@@ -209,7 +209,7 @@ int main_(Teuchos::CommandLineProcessor &clp, Xpetra::UnderlyingLib &lib, int ar
     options.print_warnings = false;
     timer->report(std::cout, comm, options);
 
-    auto xmlOut = timer->reportWatchrXML(std::string("MueLu_MatrixMatrix") + std::to_string(comm->getSize()), comm);
+    auto xmlOut = timer->reportWatchrXML(std::string("MueLu MatrixMatrix Multiply ") + std::to_string(comm->getSize()) + " ranks", comm);
     if(xmlOut.length())
       std::cout << "\nAlso created Watchr performance report " << xmlOut << '\n';
 
@@ -275,7 +275,7 @@ namespace MueLuTests {
     using Teuchos::RCP;
 #include <MueLu_UseShortNames.hpp>
 
-    size_t numLocalRowsInA = rowMap->getNodeNumElements();
+    size_t numLocalRowsInA = rowMap->getLocalNumElements();
     // Now allocate random number of entries per row for each processor, between minEntriesPerRow and maxEntriesPerRow
     Teuchos::ArrayRCP<size_t> eprData(numLocalRowsInA);
     for (Teuchos::ArrayRCP<size_t>::iterator i=eprData.begin(); i!=eprData.end(); ++i) {
@@ -283,7 +283,7 @@ namespace MueLuTests {
     }
 
     // Populate CrsMatrix with random nnz per row and with random column locations.
-    ArrayView<const GlobalOrdinal> myGlobalElements = rowMap->getNodeElementList();
+    ArrayView<const GlobalOrdinal> myGlobalElements = rowMap->getLocalElementList();
     GO numGlobalRows = rowMap->getGlobalNumElements();
 
     LO realMaxEntriesPerRow = maxEntriesPerRow;

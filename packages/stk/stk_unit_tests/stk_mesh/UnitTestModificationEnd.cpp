@@ -42,7 +42,6 @@
 #include <stk_mesh/base/BulkData.hpp>   // for BulkData, etc
 #include <stk_mesh/base/GetEntities.hpp>  // for count_entities, etc
 #include <stk_util/parallel/Parallel.hpp>  // for ParallelMachine, etc
-#include <stk_util/parallel/ParallelReduce.hpp>  // for Reduce, ReduceSum, etc
 #include <gtest/gtest.h>
 #include <string>                       // for string, basic_string, etc
 #include <vector>                       // for vector, etc
@@ -829,7 +828,7 @@ TEST(BulkDataModificationEnd, test_invalid_add_node_sharing)
     }
 }
 
-TEST(BulkDataModificationEnd, DISABLED_create_edges_with_min_map)
+TEST(BulkDataModificationEnd, create_edges_with_min_map)
 {
     MPI_Comm communicator = MPI_COMM_WORLD;
     int numProcs = -1;
@@ -976,7 +975,7 @@ TEST(TestModificationEnd, destroySharedNode_twoSharers_deinducePartMembership)
     0,0, 1,0, 2,0,
     0,1, 1,1, 2,1
   };
-  stk::unit_test_util::setup_text_mesh(bulk, meshDesc, coordinates);
+  stk::unit_test_util::setup_text_mesh(bulk, stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
 
   bulk.modification_begin();
   if (bulk.parallel_rank() == 1) {
@@ -1016,7 +1015,7 @@ TEST(TestModificationEnd, destroySharedNode_threeSharers_deinducePartMembership)
     0,1, 1,1, 2,1,
     0,2, 1,2
   };
-  stk::unit_test_util::setup_text_mesh(bulk, meshDesc, coordinates);
+  stk::unit_test_util::setup_text_mesh(bulk, stk::unit_test_util::get_full_text_mesh_desc(meshDesc, coordinates));
 
   bulk.modification_begin();
   if (bulk.parallel_rank() == 2) {

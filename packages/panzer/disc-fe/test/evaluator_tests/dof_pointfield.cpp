@@ -129,13 +129,16 @@ DummyFieldEvaluator<EvalT, Traits>::
 evaluateFields(
   typename Traits::EvalData  /* workset */)
 { 
-  int i = 0;
-  for(int cell=0;cell<fieldValue.extent_int(0);cell++) {
-    for(int pt=0;pt<fieldValue.extent_int(1);pt++) {
-      fieldValue(cell,pt) = 1.0+i;
-      ++i;
-    }
-  }
+  auto lfieldValue=fieldValue;
+  Kokkos::parallel_for(1, KOKKOS_LAMBDA (int ) { 
+      int i = 0;
+      for(int cell=0;cell<lfieldValue.extent_int(0);cell++) {
+	for(int pt=0;pt<lfieldValue.extent_int(1);pt++) {
+	  lfieldValue(cell,pt) = 1.0+i;
+	  ++i;
+	}
+      }
+    });
 }
 //**********************************************************************
 template<typename EvalT, typename Traits>
@@ -187,17 +190,18 @@ RefCoordEvaluator<EvalT, Traits>::
 evaluateFields(
   typename Traits::EvalData  /* workset */)
 { 
-  for(int cell=0;cell<fieldValue.extent_int(0);cell++)
-    for(int pt=0;pt<fieldValue.extent_int(1);pt++)
-      fieldValue(cell,pt) = quadValues->cub_points(cell,pt);
+  auto lfieldValue = fieldValue;
+  auto lcub_points = quadValues->cub_points;
+  Kokkos::parallel_for(1, KOKKOS_LAMBDA (int ) { 
+      for(int cell=0;cell<lfieldValue.extent_int(0);cell++)
+	for(int pt=0;pt<lfieldValue.extent_int(1);pt++)
+	  lfieldValue(cell,pt) = lcub_points(cell,pt);
+    });
 }
 //**********************************************************************
 
 TEUCHOS_UNIT_TEST_TEMPLATE_1_DECL(dof_pointfield,value,EvalType)
 {
-  typedef Sacado::ScalarValue<typename EvalType::ScalarT> SV;
-
-
   // build global (or serial communicator)
   #ifdef HAVE_MPI
      Teuchos::RCP<Epetra_Comm> eComm = Teuchos::rcp(new Epetra_MpiComm(MPI_COMM_WORLD));
@@ -220,15 +224,17 @@ TEUCHOS_UNIT_TEST_TEMPLATE_1_DECL(dof_pointfield,value,EvalType)
   MDFieldArrayFactory af("",true);
   workset->cell_vertex_coordinates = af.buildStaticArray<double,Cell,NODE,Dim>("coords",numCells,numVerts,dim);
   Workset::CellCoordArray coords = workset->cell_vertex_coordinates;
-  coords(0,0,0) = 1.0; coords(0,0,1) = 0.0;
-  coords(0,1,0) = 1.0; coords(0,1,1) = 1.0;
-  coords(0,2,0) = 0.0; coords(0,2,1) = 1.0;
-  coords(0,3,0) = 0.0; coords(0,3,1) = 0.0;
+  Kokkos::parallel_for(1, KOKKOS_LAMBDA (int ) { 
+      coords(0,0,0) = 1.0; coords(0,0,1) = 0.0;
+      coords(0,1,0) = 1.0; coords(0,1,1) = 1.0;
+      coords(0,2,0) = 0.0; coords(0,2,1) = 1.0;
+      coords(0,3,0) = 0.0; coords(0,3,1) = 0.0;
 
-  coords(1,0,0) = 1.0; coords(1,0,1) = 1.0;
-  coords(1,1,0) = 2.0; coords(1,1,1) = 2.0;
-  coords(1,2,0) = 1.0; coords(1,2,1) = 3.0;
-  coords(1,3,0) = 0.0; coords(1,3,1) = 2.0;
+      coords(1,0,0) = 1.0; coords(1,0,1) = 1.0;
+      coords(1,1,0) = 2.0; coords(1,1,1) = 2.0;
+      coords(1,2,0) = 1.0; coords(1,2,1) = 3.0;
+      coords(1,3,0) = 0.0; coords(1,3,1) = 2.0;
+    });
 
   Teuchos::RCP<shards::CellTopology> topo
     = Teuchos::rcp(new shards::CellTopology(shards::getCellTopologyData< shards::Quadrilateral<4> >()));
@@ -374,12 +380,18 @@ TEUCHOS_UNIT_TEST_TEMPLATE_1_DECL(dof_pointfield,value,EvalType)
   TEST_EQUALITY(refField.size(),dofPointField1.size());
 
   // check the results
+  auto refField_h = Kokkos::create_mirror_view(refField.get_view());
+  Kokkos::deep_copy(refField_h, refField.get_view());
+  auto dofPointField0_h = Kokkos::create_mirror_view(dofPointField0.get_view());
+  Kokkos::deep_copy(dofPointField0_h, dofPointField0.get_view());
+  auto dofPointField1_h = Kokkos::create_mirror_view(dofPointField1.get_view());
+  Kokkos::deep_copy(dofPointField1_h, dofPointField1.get_view());
   for(int cell=0;cell<refField.extent_int(0);cell++) {
     for(int pt=0;pt<refField.extent_int(1);pt++) {
-      TEST_FLOATING_EQUALITY(SV::eval(refField(cell,pt)),SV::eval(dofPointField0(cell,pt)),1e-15);
-      TEST_FLOATING_EQUALITY(SV::eval(refField(cell,pt)),SV::eval(dofPointField1(cell,pt)),1e-15);
-      // TEST_EQUALITY(refField(cell,pt),dofPointField0(cell,pt));
-      // TEST_EQUALITY(refField(cell,pt),dofPointField1(cell,pt));
+      TEST_FLOATING_EQUALITY(Sacado::scalarValue(refField_h(cell,pt)),Sacado::scalarValue(dofPointField0_h(cell,pt)),1e-15);
+      TEST_FLOATING_EQUALITY(Sacado::scalarValue(refField_h(cell,pt)),Sacado::scalarValue(dofPointField1_h(cell,pt)),1e-15);
+      // TEST_EQUALITY(refField_h(cell,pt),dofPointField0_h(cell,pt));
+      // TEST_EQUALITY(refField_h(cell,pt),dofPointField1_h(cell,pt));
     }
   }
 }

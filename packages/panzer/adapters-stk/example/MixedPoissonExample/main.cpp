@@ -119,8 +119,6 @@ int main(int argc,char * argv[])
    using panzer::StrPureBasisPair;
    using panzer::StrPureBasisComp;
 
-   Kokkos::initialize(argc,argv);
-
    //panzer::HP::inst().overrideSizes(1,1,1);
 
    {
@@ -130,6 +128,7 @@ int main(int argc,char * argv[])
 
 
      Teuchos::GlobalMPISession mpiSession(&argc,&argv);
+     Kokkos::initialize(argc,argv);
      RCP<Epetra_Comm> Comm = Teuchos::rcp(new Epetra_MpiComm(MPI_COMM_WORLD));
      Teuchos::RCP<const Teuchos::MpiComm<int> > comm = Teuchos::rcp(new Teuchos::MpiComm<int>(MPI_COMM_WORLD));
      Teuchos::FancyOStream out(Teuchos::rcpFromRef(std::cout));
@@ -259,7 +258,7 @@ int main(int argc,char * argv[])
      // finish building mesh, set required field variables and mesh bulk data
      ////////////////////////////////////////////////////////////////////////
 
-     for (const auto pb : physicsBlocks) {
+     for (const auto& pb : physicsBlocks) {
         const std::vector<StrPureBasisPair> & blockFields = pb->getProvidedDOFs();
 
         // insert all fields into a set

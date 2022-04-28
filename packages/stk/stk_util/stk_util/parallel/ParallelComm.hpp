@@ -35,15 +35,15 @@
 #ifndef stk_util_parallel_ParallelComm_hpp
 #define stk_util_parallel_ParallelComm_hpp
 
-#include <cstddef>                      // for size_t, ptrdiff_t
-#include <vector>
-#include <map>
-#include <stk_util/parallel/Parallel.hpp>  // for ParallelMachine
-#include <stk_util/util/ReportHandler.hpp> // for ThrowAssertMsg
-
-namespace stk { template <unsigned int N> struct CommBufferAlign; }
-
-//------------------------------------------------------------------------
+#include "stk_util/parallel/Parallel.hpp"   // for MPI_Irecv, MPI_Wait, MPI_Barrier, MPI_Send
+#include "stk_util/parallel/MPITagManager.hpp"  // for MPITagManager
+#include "stk_util/stk_config.h"            // for STK_HAS_MPI
+#include "stk_util/util/ReportHandler.hpp"  // for ThrowAssertMsg, ThrowRequire
+#include <cstddef>                          // for size_t, ptrdiff_t
+#include <map>                              // for map
+#include <stdexcept>                        // for runtime_error
+#include <string>                           // for string
+#include <vector>                           // for vector
 
 namespace stk {
 
@@ -57,23 +57,39 @@ namespace stk {
  */
 class CommSparse;
 class CommNeighbors;
+class CommBroadcast;
 
-/** Pack and unpack buffers for the sparse all-to-all communication.
- */
-class CommBuffer ;
+template<typename T>
+struct is_pair { static constexpr bool value = false; };
 
-//------------------------------------------------------------------------
+template<template<typename...> class C, typename U, typename V>
+struct is_pair<C<U,V>> { static constexpr bool value = std::is_same<C<U,V>, std::pair<U,V>>::value; };
+
+template <typename T>
+using IsPair = std::enable_if_t<is_pair<T>::value>;
+
+template <typename T>
+using NotPair = std::enable_if_t<!is_pair<T>::value>;
 
 class CommBuffer {
 public:
 
   /** Pack a value to be sent:  buf.pack<type>( value ) */
-  template<typename T> CommBuffer &pack( const T & value );
+  template<typename T,
+           class = NotPair<T>>
+  CommBuffer &pack( const T & value );
 
   CommBuffer &pack( const std::string & value );
 
+  template<typename P,
+           class = IsPair<P>, class = void>
+  CommBuffer &pack(const P & value);
+
   template<typename K, typename V>
   CommBuffer &pack( const std::map<K,V> & value );
+
+  template<typename K>
+  CommBuffer &pack( const std::vector<K> & value );
 
 private:
   /** Do not try to pack a pointer for global communication */
@@ -88,12 +104,21 @@ public:
   template<typename T> CommBuffer &pack( const T * value , size_t number );
 
   /** Unpack a received value:  buf.unpack<type>( value ) */
-  template<typename T> CommBuffer &unpack( T & value );
+  template<typename T,
+           class = NotPair<T>>
+  CommBuffer &unpack( T & value );
 
   CommBuffer &unpack( std::string& value );
 
+  template<typename P,
+           class = IsPair<P>, class = void>
+  CommBuffer &unpack( P & value);
+
   template<typename K, typename V>
   CommBuffer &unpack( std::map<K,V> & value );
+
+  template<typename K>
+  CommBuffer &unpack( std::vector<K> & value );
 
   /** Unpack an array of received values:  buf.unpack<type>( ptr , num ) */
   template<typename T> CommBuffer &unpack( T * value , size_t number );
@@ -110,7 +135,14 @@ public:
   CommBuffer &peek( std::map<K,V> & value );
 
   /** Skip buffer ahead by a number of values. */
-  template<typename T> CommBuffer &skip( size_t number );
+  template<typename T,
+           class = NotPair<T>>
+  CommBuffer &skip( size_t number );
+
+  /** Skip buffer ahead by a number of values. */
+  template<typename T,
+           class = IsPair<T>, class = void>
+  CommBuffer &skip( size_t number );
 
   /** Reset the buffer to the beginning so that size() == 0 */
   void reset();
@@ -142,13 +174,12 @@ public:
   ~CommBuffer() {}
   CommBuffer() : m_beg(nullptr), m_ptr(nullptr), m_end(nullptr) { }
 
+  void set_buffer_ptrs(unsigned char* begin, unsigned char* ptr, unsigned char* end);
+
 private:
   friend class CommSparse ;
   friend class CommNeighbors ;
   friend class CommBroadcast ;
-
-  static CommBuffer * allocate( const unsigned, const unsigned * const );
-  static void deallocate( const unsigned , CommBuffer * );
 
   void pack_overflow() const ;
   void unpack_overflow() const ;
@@ -202,20 +233,23 @@ private:
 //----------------------------------------------------------------------
 // Inlined template implementations for the CommBuffer
 
-template<>
-struct CommBufferAlign<1> {
-  static size_t align( size_t ) { return 0 ; }
-};
-
 template<unsigned N>
 struct CommBufferAlign {
   static size_t align( size_t i ) { i %= N ; return i ? ( N - i ) : 0 ; }
 };
 
-template<typename T>
+template<>
+struct CommBufferAlign<1> {
+  static size_t align( size_t ) { return 0 ; }
+};
+
+template<typename T, class>
 inline
 CommBuffer &CommBuffer::pack( const T & value )
 {
+  if (std::is_same<T, std::string>::value) {
+    return pack(value);
+  }
   enum { Size = sizeof(T) };
   size_t nalign = CommBufferAlign<Size>::align( m_ptr - m_beg );
   if ( m_beg ) {
@@ -240,6 +274,15 @@ CommBuffer &CommBuffer::pack( const std::string & value )
   return *this;
 }
 
+template<typename P, class, class>
+inline
+CommBuffer &CommBuffer::pack(const P & value)
+{
+  pack(value.first);
+  pack(value.second);
+  return *this;
+}
+
 template<typename K, typename V>
 inline
 CommBuffer &CommBuffer::pack( const std::map<K,V> & value )
@@ -253,6 +296,17 @@ CommBuffer &CommBuffer::pack( const std::map<K,V> & value )
     pack(s.second);
   }
 
+  return *this;
+}
+
+template<typename K>
+inline
+CommBuffer &CommBuffer::pack( const std::vector<K> & value )
+{
+  pack<unsigned>(value.size());
+  for (size_t i=0; i<value.size(); ++i) {
+    pack(value[i]);
+  }
   return *this;
 }
 
@@ -275,7 +329,7 @@ CommBuffer &CommBuffer::pack( const T * value , size_t number )
   return *this;
 }
 
-template<typename T>
+template<typename T, class>
 inline
 CommBuffer &CommBuffer::skip( size_t number )
 {
@@ -285,10 +339,22 @@ CommBuffer &CommBuffer::skip( size_t number )
   return *this;
 }
 
-template<typename T>
+template<typename T, class, class>
+inline
+CommBuffer &CommBuffer::skip( size_t number )
+{
+  skip<typename T::first_type>(number);
+  skip<typename T::second_type>(number);
+  return *this;
+}
+
+template<typename T, class>
 inline
 CommBuffer &CommBuffer::unpack( T & value )
 {
+  if (std::is_same<T,std::string>::value) {
+    return unpack(value);
+  }
   enum { Size = sizeof(T) };
   const size_t nalign = CommBufferAlign<Size>::align( m_ptr - m_beg );
   T * tmp = reinterpret_cast<T*>( m_ptr + nalign );
@@ -306,6 +372,16 @@ CommBuffer &CommBuffer::unpack( std::string & value )
   std::vector<char> chars(length);
   unpack(chars.data(), length);
   value.assign(chars.data(), length);
+  return *this;
+}
+
+template<typename P,
+         class, class>
+inline
+CommBuffer &CommBuffer::unpack( P & value)
+{
+  unpack(value.first);
+  unpack(value.second);
   return *this;
 }
 
@@ -327,6 +403,21 @@ CommBuffer &CommBuffer::unpack( std::map<K,V> & value )
     unpack(val);
 
     value[key] = val;
+  }
+  return *this;
+}
+
+template<typename K>
+inline
+CommBuffer &CommBuffer::unpack( std::vector<K> & value )
+{
+  unsigned num_items = 0;
+  unpack<unsigned>(num_items);
+  value.resize(num_items);
+  for (unsigned i=0;i<num_items;++i) {
+    K val;
+    unpack(val);
+    value[i] = val;
   }
   return *this;
 }
@@ -356,11 +447,9 @@ template<typename T>
 inline
 CommBuffer &CommBuffer::peek( T & value )
 {
-  enum { Size = sizeof(T) };
-  const size_t nalign = CommBufferAlign<Size>::align( m_ptr - m_beg );
-  T * tmp = reinterpret_cast<T*>( m_ptr + nalign );
-  value = *tmp ;
-  if ( m_end < reinterpret_cast<ucharp>(++tmp) ) { unpack_overflow(); }
+  ucharp oldPtr = m_ptr;
+  unpack<T>(value);
+  m_ptr = oldPtr;
   return *this;
 }
 
@@ -435,7 +524,7 @@ void parallel_data_exchange_t(std::vector< std::vector<T> > &send_lists,
   //
   //  Determine the number of processors involved in this communication
   //
-  const int msg_tag = 10242;
+  auto msg_tag = get_mpi_tag_manager().get_tag(mpi_communicator, 10242);
   int num_procs;
   MPI_Comm_size(mpi_communicator, &num_procs);
   int my_proc;
@@ -488,13 +577,13 @@ void parallel_data_exchange_t(std::vector< std::vector<T> > &send_lists,
 template<typename T>
 void parallel_data_exchange_sym_t(std::vector< std::vector<T> > &send_lists,
                                   std::vector< std::vector<T> > &recv_lists,
-                                  MPI_Comm &mpi_communicator )
+                                  const MPI_Comm &mpi_communicator )
 {
   //
   //  Determine the number of processors involved in this communication
   //
 #if defined( STK_HAS_MPI)
-  const int msg_tag = 10242;
+  auto msg_tag = get_mpi_tag_manager().get_tag(mpi_communicator, 10242);
   int num_procs = stk::parallel_machine_size(mpi_communicator);
   int class_size = sizeof(T);
 
@@ -530,39 +619,45 @@ void parallel_data_exchange_sym_t(std::vector< std::vector<T> > &send_lists,
 }
 
 template<typename T>
-inline void parallel_data_exchange_nonsym_known_sizes_t(std::vector< std::vector<T> > &send_lists,
-                                                std::vector< std::vector<T> > &recv_lists,
-                                                MPI_Comm mpi_communicator )
+inline
+void parallel_data_exchange_nonsym_known_sizes_t(const int* sendOffsets,
+                                                 T* sendData,
+                                                 const int* recvOffsets,
+                                                 T* recvData,
+                                                 MPI_Comm mpi_communicator )
 {
 #if defined( STK_HAS_MPI)
-  const int msg_tag = 10243; //arbitrary tag value, anything less than 32768 is legal
-  int num_procs = stk::parallel_machine_size(mpi_communicator);
-  int class_size = sizeof(T);
+  const auto msg_tag = get_mpi_tag_manager().get_tag(mpi_communicator, 10243); //arbitrary tag value, anything less than 32768 is legal
+  const int num_procs = stk::parallel_machine_size(mpi_communicator);
+  const int bytesPerScalar = sizeof(T);
 
   //
   //  Send the actual messages as raw byte streams.
   //
   std::vector<MPI_Request> recv_handles(num_procs);
   for(int iproc = 0; iproc < num_procs; ++iproc) {
-    if(recv_lists[iproc].size() > 0) {
-      char* recv_buffer = (char*)recv_lists[iproc].data();
-      int recv_size = recv_lists[iproc].size()*class_size;
-      MPI_Irecv(recv_buffer, recv_size, MPI_CHAR, iproc, msg_tag, mpi_communicator, &recv_handles[iproc]);
+    const int recvSize = recvOffsets[iproc+1]-recvOffsets[iproc];
+    if(recvSize > 0) {
+      char* recvBuffer = (char*)(&recvData[recvOffsets[iproc]]);
+      const int recvSizeBytes = recvSize*bytesPerScalar;
+      MPI_Irecv(recvBuffer, recvSizeBytes, MPI_CHAR, iproc, msg_tag, mpi_communicator, &recv_handles[iproc]);
     }
   }
 
   MPI_Barrier(mpi_communicator);
 
   for(int iproc = 0; iproc < num_procs; ++iproc) {
-    if(send_lists[iproc].size() > 0) {
-      char* send_buffer = (char*)send_lists[iproc].data();
-      int send_size = send_lists[iproc].size()*class_size;
-      MPI_Send(send_buffer, send_size, MPI_CHAR, iproc, msg_tag, mpi_communicator);
+    const int sendSize = sendOffsets[iproc+1]-sendOffsets[iproc];
+    if(sendSize > 0) {
+      char* sendBuffer = (char*)(&sendData[sendOffsets[iproc]]);
+      const int sendSizeBytes = sendSize*bytesPerScalar;
+      MPI_Send(sendBuffer, sendSizeBytes, MPI_CHAR, iproc, msg_tag, mpi_communicator);
     }
   }
 
   for(int iproc = 0; iproc < num_procs; ++iproc) {
-    if(recv_lists[iproc].size() > 0) {
+    const int recvSize = recvOffsets[iproc+1]-recvOffsets[iproc];
+    if(recvSize > 0) {
       MPI_Status status;
       MPI_Wait( &recv_handles[iproc], &status );
     }
@@ -581,7 +676,7 @@ void parallel_data_exchange_sym_unknown_size_t(std::vector< std::vector<T> > &se
                                                MPI_Comm &mpi_communicator )
 {
 #if defined( STK_HAS_MPI)
-  const int msg_tag = 10242;
+  const auto msg_tag = get_mpi_tag_manager().get_tag(mpi_communicator, 10242);
   int num_procs = stk::parallel_machine_size(mpi_communicator);
   int class_size = sizeof(T);
 
@@ -650,7 +745,7 @@ void parallel_data_exchange_sym_pack_unpack(MPI_Comm mpi_communicator,
                                             bool deterministic)
 {
 #if defined( STK_HAS_MPI)
-  const int msg_tag = 10242;
+  const auto msg_tag = get_mpi_tag_manager().get_tag(mpi_communicator, 10242);
   int class_size = sizeof(T);
 
   int num_comm_procs = comm_procs.size();

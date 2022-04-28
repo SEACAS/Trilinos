@@ -48,7 +48,10 @@
 #include "Tpetra_Details_getNumDiags.hpp"
 #include "Tpetra_Details_extractBlockDiagonal.hpp"
 #include "Tpetra_Details_scaleBlockDiagonal.hpp"
+#include "Tpetra_Apply_Helpers.hpp"
+#include "TpetraUtils_MatrixGenerator.hpp"
 #include <type_traits> // std::is_same
+
 
 // TODO: add test where some nodes have zero rows
 // TODO: add test where non-"zero" graph is used to build matrix; if no values are added to matrix, the operator effect should be zero. This tests that matrix values are initialized properly.
@@ -156,11 +159,11 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
   { \
     using Teuchos::outArg; \
     RCP<const Comm<int> > STCOMM = matrix.getComm(); \
-    ArrayView<const GO> STMYGIDS = matrix.getRowMap()->getNodeElementList(); \
+    ArrayView<const GO> STMYGIDS = matrix.getRowMap()->getLocalElementList(); \
     ArrayView<const LO> loview; \
     ArrayView<const Scalar> sview; \
     size_t STMAX = 0; \
-    for (size_t STR=0; STR < matrix.getNodeNumRows(); ++STR) { \
+    for (size_t STR=0; STR < matrix.getLocalNumRows(); ++STR) { \
       const size_t numEntries = matrix.getNumEntriesInLocalRow(STR); \
       TEST_EQUALITY( numEntries, matrix.getNumEntriesInGlobalRow( STMYGIDS[STR] ) ); \
       matrix.getLocalRowView(STR,loview,sview); \
@@ -168,7 +171,7 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
       TEST_EQUALITY( static_cast<size_t>( sview.size()), numEntries ); \
       STMAX = std::max( STMAX, numEntries ); \
     } \
-    TEST_EQUALITY( matrix.getNodeMaxNumRowEntries(), STMAX ); \
+    TEST_EQUALITY( matrix.getLocalMaxNumRowEntries(), STMAX ); \
     global_size_t STGMAX; \
     Teuchos::reduceAll<int,global_size_t>( *STCOMM, Teuchos::REDUCE_MAX, STMAX, outArg(STGMAX) ); \
     TEST_EQUALITY( matrix.getGlobalMaxNumRowEntries(), STGMAX ); \
@@ -228,14 +231,14 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
     }
     // test the properties
     TEST_EQUALITY(eye->getGlobalNumEntries()  , numImages*numLocal);
-    TEST_EQUALITY(eye->getNodeNumEntries()      , numLocal);
+    TEST_EQUALITY(eye->getLocalNumEntries()      , numLocal);
     TEST_EQUALITY(eye->getGlobalNumRows()      , numImages*numLocal);
-    TEST_EQUALITY(eye->getNodeNumRows()          , numLocal);
-    TEST_EQUALITY(eye->getNodeNumCols()          , numLocal);
+    TEST_EQUALITY(eye->getLocalNumRows()          , numLocal);
+    TEST_EQUALITY(eye->getLocalNumCols()          , numLocal);
     TEST_EQUALITY( Tpetra::Details::getGlobalNumDiags (*eye), static_cast<GO> (numImages*numLocal) );
     TEST_EQUALITY( Tpetra::Details::getLocalNumDiags (*eye), static_cast<LO> (numLocal) );
     TEST_EQUALITY(eye->getGlobalMaxNumRowEntries(), 1);
-    TEST_EQUALITY(eye->getNodeMaxNumRowEntries()    , 1);
+    TEST_EQUALITY(eye->getLocalMaxNumRowEntries()    , 1);
     TEST_EQUALITY(eye->getIndexBase()          , 0);
     TEST_EQUALITY_CONST(eye->getRowMap()->isSameAs(*eye->getColMap())   , true);
     TEST_EQUALITY_CONST(eye->getRowMap()->isSameAs(*eye->getDomainMap()), true);
@@ -358,8 +361,7 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
     RCP<const Map<LO,GO,Node> > map = createContigMapWithNode<LO,GO,Node>(INVALID,1,comm);
     const Scalar SZERO = ScalarTraits<Scalar>::zero();
     {
-      Tpetra::ProfileType pftype = TPETRA_DEFAULT_PROFILE_TYPE;
-      MAT matrix(map,map,1,pftype);
+      MAT matrix(map,map,1);
       TEST_EQUALITY_CONST( matrix.isFillActive(),   true );
       TEST_EQUALITY_CONST( matrix.isFillComplete(), false );
       matrix.insertLocalValues( 0, tuple<LO>(0), tuple<Scalar>(0) );
@@ -388,14 +390,11 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
       numValid = matrix.sumIntoLocalValues (0, tuple<LO> (0), tuple<Scalar> (0));
       TEST_EQUALITY( numValid, Teuchos::OrdinalTraits<LO>::invalid () );
 
-      TEST_THROW( matrix.setAllToScalar(SZERO), std::runtime_error );
-      TEST_THROW( matrix.scale(SZERO),          std::runtime_error );
       TEST_THROW( matrix.globalAssemble(),      std::runtime_error );
       TEST_THROW( matrix.fillComplete(),        std::runtime_error );
     }
     {
-      Tpetra::ProfileType pftype = TPETRA_DEFAULT_PROFILE_TYPE;
-      MAT matrix(map,map,1,pftype);
+      MAT matrix(map,map,1);
       TEST_EQUALITY_CONST( matrix.isFillActive(),   true );
       TEST_EQUALITY_CONST( matrix.isFillComplete(), false );
       matrix.insertLocalValues( 0, tuple<LO>(0), tuple<Scalar>(0) );
@@ -455,14 +454,14 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
 
     // test the properties
     TEST_EQUALITY(eye->getGlobalNumEntries()  , numImages*numLocal);
-    TEST_EQUALITY(eye->getNodeNumEntries()      , numLocal);
+    TEST_EQUALITY(eye->getLocalNumEntries()      , numLocal);
     TEST_EQUALITY(eye->getGlobalNumRows()      , numImages*numLocal);
-    TEST_EQUALITY(eye->getNodeNumRows()          , numLocal);
-    TEST_EQUALITY(eye->getNodeNumCols()          , numLocal);
+    TEST_EQUALITY(eye->getLocalNumRows()          , numLocal);
+    TEST_EQUALITY(eye->getLocalNumCols()          , numLocal);
     TEST_EQUALITY( Tpetra::Details::getGlobalNumDiags (*eye), static_cast<GO> (numImages*numLocal) );
     TEST_EQUALITY( Tpetra::Details::getLocalNumDiags (*eye), static_cast<LO> (numLocal) );
     TEST_EQUALITY(eye->getGlobalMaxNumRowEntries(), 1);
-    TEST_EQUALITY(eye->getNodeMaxNumRowEntries()    , 1);
+    TEST_EQUALITY(eye->getLocalMaxNumRowEntries()    , 1);
     TEST_EQUALITY(eye->getIndexBase()          , 0);
     TEST_EQUALITY_CONST(eye->getRowMap()!=Teuchos::null, true);
     TEST_EQUALITY_CONST(eye->getColMap()!=Teuchos::null, true);
@@ -523,14 +522,14 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
 
     // test the properties
     TEST_EQUALITY(eye->getGlobalNumEntries()  , numImages*numLocal);
-    TEST_EQUALITY(eye->getNodeNumEntries()      , numLocal);
+    TEST_EQUALITY(eye->getLocalNumEntries()      , numLocal);
     TEST_EQUALITY(eye->getGlobalNumRows()      , numImages*numLocal);
-    TEST_EQUALITY(eye->getNodeNumRows()          , numLocal);
-    TEST_EQUALITY(eye->getNodeNumCols()          , numLocal);
+    TEST_EQUALITY(eye->getLocalNumRows()          , numLocal);
+    TEST_EQUALITY(eye->getLocalNumCols()          , numLocal);
     TEST_EQUALITY( Tpetra::Details::getGlobalNumDiags (*eye), static_cast<GO> (numImages*numLocal) );
     TEST_EQUALITY( Tpetra::Details::getLocalNumDiags (*eye), static_cast<LO> (numLocal) );
     TEST_EQUALITY(eye->getGlobalMaxNumRowEntries(), 1);
-    TEST_EQUALITY(eye->getNodeMaxNumRowEntries()    , 1);
+    TEST_EQUALITY(eye->getLocalMaxNumRowEntries()    , 1);
     TEST_EQUALITY(eye->getIndexBase()          , 0);
     TEST_EQUALITY_CONST(eye->getRowMap()!=Teuchos::null, true);
     TEST_EQUALITY_CONST(eye->getColMap()!=Teuchos::null, true);
@@ -604,8 +603,7 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
     auto map = createContigMapWithNode<LO, GO, Node> (INVALID, 1, comm);
 
     // construct matrix
-    Tpetra::ProfileType pftype = TPETRA_DEFAULT_PROFILE_TYPE;
-    CrsMatrix<Scalar,LO,GO,Node> A (map, map, 1, pftype);
+    CrsMatrix<Scalar,LO,GO,Node> A (map, map, 1);
     A.insertLocalValues (0, tuple<LO> (0), tuple<Scalar> (STS::zero ()));
     A.fillComplete (map, map);
 
@@ -829,16 +827,18 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
     // Make some vectors
     RCP<MV> toScale2 = rcp(new MV(map,1));
     RCP<MV> toScale4 = rcp(new MV(map,1)); 
-    auto v2 = toScale2->getDataNonConst(0);
-    auto v4 = toScale4->getDataNonConst(0);
-    for(size_t i=0; i<numLocal; i++){
-      if(i%2 == 0) {
-        v2[i] = SC_one;
-        v4[i] = SC_one;
-      }
-      else {        
-        v2[i] = SC_one+SC_one;
-        v4[i] = SC_one+SC_one;
+    {
+      auto v2 = toScale2->getDataNonConst(0);
+      auto v4 = toScale4->getDataNonConst(0);
+      for(size_t i=0; i<numLocal; i++){
+        if(i%2 == 0) {
+          v2[i] = SC_one;
+          v4[i] = SC_one;
+        }
+        else {        
+          v2[i] = SC_one+SC_one;
+          v4[i] = SC_one+SC_one;
+        }
       }
     }    
     
@@ -926,18 +926,20 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
     // Make some vectors
     RCP<MV> toScale2 = rcp(new MV(map,1));
     RCP<MV> toScale4 = rcp(new MV(map,1)); 
-    auto v2 = toScale2->getDataNonConst(0);
-    auto v4 = toScale4->getDataNonConst(0);
-    for(size_t i=0; i<numLocal; i++){
-      if(i%2 == 0) {
-        v2[i] = SC_one;
-        v4[i] = SC_one;
-      }
-      else {        
-        v2[i] = SC_one+SC_one;
-        v4[i] = SC_one+SC_one;
-      }
-    }    
+    {
+      auto v2 = toScale2->getDataNonConst(0);
+      auto v4 = toScale4->getDataNonConst(0);
+      for(size_t i=0; i<numLocal; i++){
+        if(i%2 == 0) {
+          v2[i] = SC_one;
+          v4[i] = SC_one;
+        }
+        else {        
+          v2[i] = SC_one+SC_one;
+          v4[i] = SC_one+SC_one;
+        }
+      }    
+    }
 
     // Now, let's rescale some vectors
     Tpetra::Details::inverseScaleBlockDiagonal(*diag2,true,*toScale2);
@@ -964,6 +966,141 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
 
   }
 
+
+  TEUCHOS_UNIT_TEST_TEMPLATE_4_DECL( CrsMatrix, ApplyHelpers, LO, GO, Scalar, Node )
+  {
+    typedef CrsMatrix<Scalar,LO,GO,Node> MAT;
+    //    typedef  Operator<Scalar,LO,GO,Node> OP;
+    typedef ScalarTraits<Scalar> ST;
+    typedef MultiVector<Scalar,LO,GO,Node> MV;
+    typedef Map<LO,GO,Node> MAP;
+    typedef typename ST::magnitudeType Mag;
+    using values_type = typename MAT::local_matrix_device_type::values_type;
+    using range_policy = Kokkos::RangePolicy<typename Node::device_type::execution_space>;
+
+    RCP<const Comm<int> > comm = Tpetra::getDefaultComm();
+    int numRanks = comm->getSize();
+
+    Scalar ZERO = ST::zero(), ONE = ST::one();
+    Mag MT_ZERO = Teuchos::ScalarTraits<Mag>::zero();
+    int nsize=100;
+
+    /* Create the identity matrix, three rows per proc */
+    RCP<MAT> A1 = Tpetra::Utils::MatrixGenerator<MAT>::generate_miniFE_matrix(nsize, comm);
+    if(!A1->isFillComplete()) A1->fillComplete();
+    RCP<const MAP> map = A1->getRowMap();
+
+    /* Now take the same thing, but multiply the entries by 2*/
+    auto lclMtx1 = A1->getLocalMatrixDevice();
+    values_type A1_values = lclMtx1.values;
+    values_type A2_values("values",A1_values.extent(0));
+    Kokkos::parallel_for( range_policy(0,A1_values.extent(0)),KOKKOS_LAMBDA(const int i){
+        A2_values[i] = A1_values[i] + A1_values[i];
+      });
+
+    RCP<MAT> A2 = rcp(new MAT(map,A1->getColMap(),lclMtx1.graph.row_map,lclMtx1.graph.entries,A2_values));
+    A2->expertStaticFillComplete(A1->getDomainMap(),A1->getRangeMap(),A1->getGraph()->getImporter(),A1->getGraph()->getExporter());
+
+    /* Allocate multivectors */
+    MV X(map,2), Y1a(map,2), Y1b(map,2), Y2a(map,2), Y2b(map,2), compare(map,2);
+    Array<Mag> norm(2), exact(2,MT_ZERO);
+    X.putScalar(ONE);
+
+    // Do a std::vector version 
+    {
+      Y1a.putScalar(ZERO);Y1b.putScalar(ZERO);
+      Y2a.putScalar(ZERO);Y2b.putScalar(ZERO);
+
+      std::vector<MAT*> matrices = {A1.get(),A2.get()};
+      std::vector<MV*>  outvec   = {&Y1b,&Y2b};
+
+      // Comparison guy
+      A1->apply(X,Y1a);
+      A2->apply(X,Y2a);
+
+      // Apply Helpers
+      Tpetra::batchedApply(matrices,X,outvec);
+     
+      // Compare
+      compare.update(ONE,Y1a,-ONE,Y1b,ZERO);
+      compare.norm1(norm());
+      if (ST::isOrdinal) {TEST_COMPARE_ARRAYS(exact,norm);}
+      else{TEST_COMPARE_FLOATING_ARRAYS(exact,norm,2.0*testingTol<Mag>());}
+
+      compare.update(ONE,Y2a,-ONE,Y2b,ZERO);
+      compare.norm1(norm());
+      if (ST::isOrdinal) {TEST_COMPARE_ARRAYS(exact,norm);}
+      else {TEST_COMPARE_FLOATING_ARRAYS(exact,norm,2.0*testingTol<Mag>());}
+    }
+
+    // Do a std::vector version w/ a nice combination of options
+    std::vector<Scalar> alpha = {ONE+ONE, ONE, ZERO};
+    std::vector<Scalar> beta  = {ONE+ONE, ONE, ZERO};
+    for(int i=0; i<(int)alpha.size(); i++) {
+      for(int j=0; j<(int)beta.size(); j++) {
+        Teuchos::RCP<Teuchos::ParameterList> params = Teuchos::rcp(new Teuchos::ParameterList());
+        Y1a.putScalar(ONE);Y1b.putScalar(ONE);
+        Y2a.putScalar(ZERO);Y2b.putScalar(ZERO);
+        
+        std::vector<MAT*> matrices = {A1.get(),A2.get()};
+        std::vector<MV*>  outvec   = {&Y1b,&Y2b};
+        
+        // Comparison guy
+        A1->apply(X,Y1a,Teuchos::NO_TRANS,alpha[i],beta[j]);
+        A2->apply(X,Y2a,Teuchos::NO_TRANS,alpha[i],beta[j]);
+      
+        // Apply Helpers
+        Tpetra::batchedApply(matrices,X,outvec,alpha[i],beta[j],params);
+      
+        // Check to make sure this guy decided we can batch appropriately
+        bool did_we_batch = params->get<bool>("can batch");
+        bool should_we_batch = (numRanks>1)?true:false;
+        TEST_EQUALITY(did_we_batch,should_we_batch);
+        
+        // Compare
+        compare.update(ONE,Y1a,-ONE,Y1b,ZERO);
+        compare.norm1(norm());
+        if (ST::isOrdinal) {TEST_COMPARE_ARRAYS(exact,norm);}
+        else{TEST_COMPARE_FLOATING_ARRAYS(exact,norm,2.0*testingTol<Mag>());}
+        
+        compare.update(ONE,Y2a,-ONE,Y2b,ZERO);
+        compare.norm1(norm());
+        if (ST::isOrdinal) {TEST_COMPARE_ARRAYS(exact,norm);}
+        else {TEST_COMPARE_FLOATING_ARRAYS(exact,norm,2.0*testingTol<Mag>());}
+      }
+    }
+
+    // Teuchos::Array version
+    // Do a std::vector version 
+    {
+      Y1a.putScalar(ZERO);Y2a.putScalar(ZERO);
+      Y1b.putScalar(ZERO);Y2b.putScalar(ZERO);
+
+      Teuchos::Array<MAT*> matrices(2); matrices[0]=A1.get(); matrices[1]=A2.get();
+      Teuchos::Array<MV*>  outvec(2);   outvec[0]=&Y1b; outvec[1]=&Y2b;
+
+      // Comparison guy
+      A1->apply(X,Y1a);
+      A2->apply(X,Y2a);
+
+      // Apply Helpers
+      Tpetra::batchedApply(matrices,X,outvec);
+
+      // Compare
+      compare.update(ONE,Y1a,-ONE,Y1b,ZERO);
+      compare.norm1(norm());
+      if (ST::isOrdinal) {TEST_COMPARE_ARRAYS(exact,norm);}
+      else{TEST_COMPARE_FLOATING_ARRAYS(exact,norm,2.0*testingTol<Mag>());}
+
+      compare.update(ONE,Y2a,-ONE,Y2b,ZERO);
+      compare.norm1(norm());
+      if (ST::isOrdinal) {TEST_COMPARE_ARRAYS(exact,norm);}
+      else {TEST_COMPARE_FLOATING_ARRAYS(exact,norm,2.0*testingTol<Mag>());}
+    }
+
+  }
+
+
 //
 // INSTANTIATIONS
 //
@@ -975,7 +1112,8 @@ inline void tupleToArray(Array<T> &arr, const tuple &tup)
       TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT( CrsMatrix, ThreeArraysESFC,   LO, GO, SCALAR, NODE ) \
       TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT( CrsMatrix, SetAllValues,      LO, GO, SCALAR, NODE ) \
       TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT( CrsMatrix, GraphOwnedByFirstMatrixSharedBySecond, LO, GO, SCALAR, NODE ) \
-      TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT( CrsMatrix, ExtractBlockDiagonal,      LO, GO, SCALAR, NODE ) 
+      TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT( CrsMatrix, ExtractBlockDiagonal,      LO, GO, SCALAR, NODE ) \
+      TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT( CrsMatrix, ApplyHelpers,      LO, GO, SCALAR, NODE )  
 
 #define UNIT_TEST_GROUP_NO_ORDINAL_SCALAR( SCALAR, LO, GO, NODE ) \
       TEUCHOS_UNIT_TEST_TEMPLATE_4_INSTANT( CrsMatrix, ScaleBlockDiagonal,      LO, GO, SCALAR, NODE ) \

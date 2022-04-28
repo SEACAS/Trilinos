@@ -1020,10 +1020,12 @@ TEST(ElementGraph, test_parallel_graph_info_data_structure)
 
         stk::mesh::Graph graph;
         graph.set_num_local_elements(2);
-        graph.add_edge(stk::mesh::GraphEdge(0, 4, 1, 1));
-        graph.add_edge(stk::mesh::GraphEdge(1, 1, 0, 4));
         stk::mesh::GraphEdge graphEdge(1, 5, -3, other_side_ord);
-        graph.add_edge(graphEdge);
+        std::vector<stk::mesh::GraphEdge> edges =
+          { stk::mesh::GraphEdge(0, 4, 1, 1),
+            stk::mesh::GraphEdge(1, 1, 0, 4),
+            graphEdge };
+        graph.add_sorted_edges(edges);
 
         stk::mesh::ParallelInfoForGraphEdges parallel_graph(stk::parallel_machine_rank(MPI_COMM_WORLD));
         int other_proc = 1;
@@ -1055,11 +1057,6 @@ TEST(ElementGraph, test_parallel_graph_info_with_parallel_element_graph)
         std::vector<size_t> counts;
         stk::mesh::count_entities(bulkData.mesh_meta_data().locally_owned_part(), bulkData, counts);
         size_t numLocallyOwnedElems = counts[stk::topology::ELEM_RANK];
-
-        stk::mesh::impl::ElementLocalIdMapper localIdMapper;
-        localIdMapper.initialize(bulkData);
-        std::vector<stk::topology> element_topologies(numLocallyOwnedElems);
-        impl::fill_topologies(bulkData, localIdMapper, element_topologies);
 
         ElemElemGraphTester elemElemGraph(bulkData);
 
@@ -1439,7 +1436,7 @@ TEST(ElementGraph, test_element_death)
                 stk::mesh::impl::populate_selected_value_for_remote_elements(bulkData, elementGraph, active, remoteActiveSelector);
 
                 double start_time = stk::wall_time();
-                process_killed_elements(bulkData, elementGraph, killedElements, active, remoteActiveSelector, boundary_mesh_parts, &boundary_mesh_parts);
+                process_killed_elements(bulkData, killedElements, active, remoteActiveSelector, boundary_mesh_parts, &boundary_mesh_parts);
                 elapsed_death_time += (stk::wall_time() - start_time);
             }
 
@@ -1513,7 +1510,7 @@ public:
         stk::mesh::impl::ParallelSelectedInfo remoteActiveSelector;
         stk::mesh::impl::populate_selected_value_for_remote_elements(*bulkData, bulkData->get_face_adjacent_element_graph(), *activePart, remoteActiveSelector);
 
-        stk::mesh::process_killed_elements(*bulkData, bulkData->get_face_adjacent_element_graph(), deactivatedElements, *activePart, remoteActiveSelector, partsForCreatingSides, NULL);
+        stk::mesh::process_killed_elements(*bulkData, deactivatedElements, *activePart, remoteActiveSelector, partsForCreatingSides, NULL);
     }
 
     void initializeObjects()
@@ -1553,7 +1550,7 @@ public:
         stk::mesh::impl::ParallelSelectedInfo remoteActiveSelector;
         stk::mesh::impl::populate_selected_value_for_remote_elements(*bulkData, bulkData->get_face_adjacent_element_graph(), *activePart, remoteActiveSelector);
 
-        process_killed_elements(*bulkData, bulkData->get_face_adjacent_element_graph(), elementsToKill, *activePart, remoteActiveSelector, partsForCreatingSides, &boundaryMeshParts);
+        process_killed_elements(*bulkData, elementsToKill, *activePart, remoteActiveSelector, partsForCreatingSides, &boundaryMeshParts);
     }
 
     void verify_mesh_before_death() const
@@ -3978,8 +3975,8 @@ TEST( ElementGraph, Hex0AddShell1Hex0Parallel )
     }
     else if (p_rank == 1) {
         // Connectivity for Shell Element 3
-        unsigned hex1Index = 1;
-        unsigned hex2Index = 0;
+        unsigned hex1Index = 0;
+        unsigned hex2Index = 1;
         EXPECT_EQ(2u,   elemElemGraph.get_num_connected_elems(shell3));
         EXPECT_EQ(1,    elemElemGraph.get_connected_remote_id_and_via_side(shell3, hex1Index).side);
         EXPECT_EQ(0,    elemElemGraph.get_connected_remote_id_and_via_side(shell3, hex2Index).side);
@@ -4113,7 +4110,7 @@ void test_add_element_to_graph_with_element_death(stk::mesh::BulkData::Automatic
         stk::mesh::impl::ParallelSelectedInfo remoteActiveSelector;
         stk::mesh::impl::populate_selected_value_for_remote_elements(bulkData, graph, active, remoteActiveSelector);
 
-        stk::mesh::process_killed_elements(bulkData, graph, deactivated_elems, active, remoteActiveSelector, boundary_mesh_parts, &boundary_mesh_parts);
+        stk::mesh::process_killed_elements(bulkData, deactivated_elems, active, remoteActiveSelector, boundary_mesh_parts, &boundary_mesh_parts);
 
         if (0 == pRank)
         {
@@ -4222,7 +4219,7 @@ void test_delete_element_from_graph_with_element_death(stk::mesh::BulkData::Auto
         stk::mesh::impl::ParallelSelectedInfo remoteActiveSelector;
         stk::mesh::impl::populate_selected_value_for_remote_elements(bulkData, graph, active, remoteActiveSelector);
 
-        stk::mesh::process_killed_elements(bulkData, graph, deactivated_elems, active, remoteActiveSelector, boundary_mesh_parts, &boundary_mesh_parts);
+        stk::mesh::process_killed_elements(bulkData, deactivated_elems, active, remoteActiveSelector, boundary_mesh_parts, &boundary_mesh_parts);
 
         stk::mesh::comm_mesh_counts(bulkData, entity_counts);
 

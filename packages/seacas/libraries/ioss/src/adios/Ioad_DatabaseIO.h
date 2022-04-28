@@ -1,37 +1,10 @@
-// Copyright(C) 1999-2010 National Technology & Engineering Solutions
+// Copyright(C) 1999-2020, 2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
-#ifndef IOSS_Ioad_DatabaseIO_h
-#define IOSS_Ioad_DatabaseIO_h
+#pragma once
 
 #include "Ioss_EntitySet.h"
 #include "Ioss_Region.h"  // for Region, SideSetContainer, etc
@@ -43,6 +16,8 @@
 #include <AdiosWrapper.h>
 
 namespace Ioss {
+  class Assembly;
+  class Blob;
   class GroupingEntity;
   class Region;
   class EntityBlock;
@@ -62,12 +37,12 @@ namespace Ioad {
   {
   public:
     DatabaseIO(Ioss::Region *region, const std::string &filename, Ioss::DatabaseUsage db_usage,
-               MPI_Comm communicator, const Ioss::PropertyManager &props);
+               Ioss_MPI_Comm communicator, const Ioss::PropertyManager &props);
     ~DatabaseIO();
     DatabaseIO(const DatabaseIO &from) = delete;
     DatabaseIO &operator=(const DatabaseIO &from) = delete;
 
-    const std::string get_format() const override {return "ADIOS2";}
+    const std::string get_format() const override { return "ADIOS2"; }
 
     bool begin__(Ioss::State state) override;
     bool end__(Ioss::State state) override;
@@ -88,6 +63,16 @@ namespace Ioad {
                                size_t data_size) const override;
     int64_t get_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
                                void *data, size_t data_size) const override
+    {
+      return -1;
+    }
+    int64_t get_field_internal(const Ioss::Assembly *sb, const Ioss::Field &field, void *data,
+                               size_t data_size) const override
+    {
+      return -1;
+    }
+    int64_t get_field_internal(const Ioss::Blob *sb, const Ioss::Field &field, void *data,
+                               size_t data_size) const override
     {
       return -1;
     }
@@ -138,6 +123,16 @@ namespace Ioad {
                                size_t data_size) const override;
     int64_t put_field_internal(const Ioss::StructuredBlock *sb, const Ioss::Field &field,
                                void *data, size_t data_size) const override
+    {
+      return -1;
+    }
+    int64_t put_field_internal(const Ioss::Assembly *sb, const Ioss::Field &field, void *data,
+                               size_t data_size) const override
+    {
+      return -1;
+    }
+    int64_t put_field_internal(const Ioss::Blob *sb, const Ioss::Field &field, void *data,
+                               size_t data_size) const override
     {
       return -1;
     }
@@ -197,13 +192,13 @@ namespace Ioad {
 
     template <typename T>
     FieldInfoType get_expected_variable_infos_from_map(const EntityMapType &fields_map,
-                                                       const std::string &  entity_type,
-                                                       const std::string &  entity_name,
-                                                       const std::string &  var_name) const;
+                                                       const std::string   &entity_type,
+                                                       const std::string   &entity_name,
+                                                       const std::string   &var_name) const;
     FieldInfoType get_variable_infos_from_map(const EntityMapType &fields_map,
-                                              const std::string &  entity_type,
-                                              const std::string &  entity_name,
-                                              const std::string &  var_name) const;
+                                              const std::string   &entity_type,
+                                              const std::string   &entity_name,
+                                              const std::string   &var_name) const;
 
     template <typename T>
     using IsIossEntityBlock =
@@ -233,7 +228,7 @@ namespace Ioad {
                                std::string name = "");
 
     void write_properties(const Ioss::GroupingEntity *const entity,
-                          const std::string &               encoded_name);
+                          const std::string                &encoded_name);
 
     template <typename T> int64_t write_meta_data_container(const T &entity_blocks);
     std::pair<int64_t, int64_t>
@@ -245,10 +240,10 @@ namespace Ioad {
                                              const std::string &string_variable) const;
 
     void get_globals(const GlobalMapType &globals_map, const FieldsMapType &properties_map);
-    void compute_block_membership__(Ioss::SideBlock *         efblock,
+    void compute_block_membership__(Ioss::SideBlock          *efblock,
                                     std::vector<std::string> &block_membership) const override;
     void define_properties(const Ioss::GroupingEntity *entity_block,
-                           const std::string &         encoded_entity_name);
+                           const std::string          &encoded_entity_name);
 
     void read_meta_data__() override;
     void read_communication_metadata();
@@ -270,4 +265,3 @@ namespace Ioad {
     double        previous_time_streaming;
   };
 } // namespace Ioad
-#endif

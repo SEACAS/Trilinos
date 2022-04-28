@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <Kokkos_Core.hpp>
-#include <impl/Kokkos_Timer.hpp>
+#include <Kokkos_Timer.hpp>
 
 #include "Tacho_Util.hpp"
 #include "Tacho_CrsMatrixBase.hpp"
@@ -13,6 +13,8 @@
 #include "Tacho_Graph.hpp"
 #include "Tacho_SymbolicTools.hpp"
 
+#include "Tacho_GraphTools.hpp"
+
 #if defined(TACHO_HAVE_SCOTCH)
 #include "Tacho_GraphTools_Scotch.hpp"
 #endif
@@ -20,8 +22,6 @@
 #if defined(TACHO_HAVE_METIS)
 #include "Tacho_GraphTools_Metis.hpp"
 #endif
-
-#include "Tacho_GraphTools_CAMD.hpp"
 
 using namespace Tacho;
 
@@ -74,7 +74,7 @@ TEST( Symbolic, functions ) {
 #elif defined(TACHO_HAVE_SCOTCH)
   GraphTools_Scotch T(G);
 #else
-  GraphTools_CAMD T(G);
+  GraphTools T(G);
 #endif
   T.reorder();
 
@@ -162,7 +162,7 @@ TEST( Symbolic, interface ) {
 #elif defined(TACHO_HAVE_SCOTCH)
   GraphTools_Scotch T(G);
 #else
-  GraphTools_CAMD T(G);
+  GraphTools T(G);  
 #endif
   T.reorder();
 

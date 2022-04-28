@@ -30,8 +30,9 @@ namespace Test {
       A_(i,i) = A_(i,i)+10;
     }
   };
+
   template<class ViewTypeA, class ViewTypeB, class ViewTypeC, class ExecutionSpace>
-  struct VanillaGEMM {
+  struct trsm_VanillaGEMM {
     bool A_t, B_t, A_c, B_c;
     int N,K;
     ViewTypeA A;
@@ -49,7 +50,8 @@ namespace Test {
     KOKKOS_INLINE_FUNCTION
     void operator() (const typename Kokkos::TeamPolicy<ExecutionSpace>::member_type& team) const {
 // GNU COMPILER BUG WORKAROUND
-#if defined(KOKKOS_COMPILER_GNU) && !defined(__CUDA_ARCH__)
+#if defined(KOKKOS_COMPILER_GNU) && !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+
       int i = team.league_rank();
 #else
       const int i = team.league_rank();
@@ -77,9 +79,9 @@ namespace Test {
       });
     }
   };
-  //
-  //
-  //
+  
+  
+  
 
   template<class ViewTypeA, class ViewTypeB, class Device>
   void impl_test_trsm(const char* side, const char* uplo, const char* trans, const char* diag, 
@@ -126,8 +128,6 @@ namespace Test {
     ScalarA alpha_trmm = ScalarA(1)/alpha;
     ScalarA beta       = ScalarA(0);
 
-    Kokkos::fence();
- 
     if ((uplo[0]=='L')||(uplo[0]=='l')) {
       for (int i = 0; i < K-1; i++)
         for (int j = i+1; j < K; j++)
@@ -141,28 +141,23 @@ namespace Test {
 
     Kokkos::deep_copy(A, h_A);
 
+    struct trsm_VanillaGEMM<ViewTypeB,ViewTypeA,ViewTypeB,execution_space> vgemm;
     if (A_l){
-      struct VanillaGEMM<ViewTypeB,ViewTypeA,ViewTypeB,execution_space> vgemm;
       vgemm.A_t = (trans[0]!='N') && (trans[0]!='n'); vgemm.B_t = false;
       vgemm.A_c = (trans[0]=='C') || (trans[0]=='c'); vgemm.B_c = false;
-      vgemm.N = N;    vgemm.K = K;
-      vgemm.A = A;    vgemm.B = X0;
-      vgemm.C = B;
-      vgemm.alpha = alpha_trmm;
-      vgemm.beta = beta;
-      Kokkos::parallel_for("KokkosBlas::Test::VanillaGEMM", Kokkos::TeamPolicy<execution_space>(M,Kokkos::AUTO,16), vgemm);
+      vgemm.A = A;     vgemm.B = X0;
     }
     else {
-      struct VanillaGEMM<ViewTypeB,ViewTypeA,ViewTypeB,execution_space> vgemm;
       vgemm.A_t = false; vgemm.B_t = (trans[0]!='N') && (trans[0]!='n');
       vgemm.A_c = false; vgemm.B_c = (trans[0]=='C') || (trans[0]=='c');
-      vgemm.N = N;     vgemm.K = K;
       vgemm.A = X0;    vgemm.B = A;
-      vgemm.C = B;
-      vgemm.alpha = alpha_trmm;
-      vgemm.beta = beta;
-      Kokkos::parallel_for("KokkosBlas::Test::VanillaGEMM", Kokkos::TeamPolicy<execution_space>(M,Kokkos::AUTO,16), vgemm);
     }
+    vgemm.N = N;
+    vgemm.K = K;
+    vgemm.C = B;
+    vgemm.alpha = alpha_trmm;
+    vgemm.beta = beta;
+    Kokkos::parallel_for("KokkosBlas::Test::trsm_VanillaGEMM", Kokkos::TeamPolicy<execution_space>(M,Kokkos::AUTO,16), vgemm);
     Kokkos::fence();
 
     KokkosBlas::trsm(side, uplo, trans, diag, alpha, A, B);
@@ -197,7 +192,7 @@ int test_trsm(const char* mode, ScalarA alpha) {
   Test::impl_test_trsm<view_type_a_ll, view_type_b_ll, Device>(&mode[0],&mode[1],&mode[2],&mode[3],0,0,alpha);
   Test::impl_test_trsm<view_type_a_ll, view_type_b_ll, Device>(&mode[0],&mode[1],&mode[2],&mode[3],101,19,alpha);
   Test::impl_test_trsm<view_type_a_ll, view_type_b_ll, Device>(&mode[0],&mode[1],&mode[2],&mode[3],19,101,alpha);
-  Test::impl_test_trsm<view_type_a_ll, view_type_b_ll, Device>(&mode[0],&mode[1],&mode[2],&mode[3],1031,731,alpha);
+  Test::impl_test_trsm<view_type_a_ll, view_type_b_ll, Device>(&mode[0],&mode[1],&mode[2],&mode[3],343,201,alpha);
 #endif
 
 #if defined(KOKKOSKERNELS_INST_LAYOUTRIGHT) || (!defined(KOKKOSKERNELS_ETI_ONLY) && !defined(KOKKOSKERNELS_IMPL_CHECK_ETI_CALLS))
@@ -206,7 +201,7 @@ int test_trsm(const char* mode, ScalarA alpha) {
   Test::impl_test_trsm<view_type_a_lr, view_type_b_lr, Device>(&mode[0],&mode[1],&mode[2],&mode[3],0,0,alpha);
   Test::impl_test_trsm<view_type_a_lr, view_type_b_lr, Device>(&mode[0],&mode[1],&mode[2],&mode[3],101,19,alpha);
   Test::impl_test_trsm<view_type_a_lr, view_type_b_lr, Device>(&mode[0],&mode[1],&mode[2],&mode[3],19,101,alpha);
-  Test::impl_test_trsm<view_type_a_lr, view_type_b_lr, Device>(&mode[0],&mode[1],&mode[2],&mode[3],1031,731,alpha);
+  Test::impl_test_trsm<view_type_a_lr, view_type_b_lr, Device>(&mode[0],&mode[1],&mode[2],&mode[3],343,201,alpha);
 #endif
 
   return 1;

@@ -6,11 +6,8 @@
 // ****************************************************************************
 // @HEADER
 
-#include "Teuchos_UnitTestHarness.hpp"
+#include "Tempus_UnitTest_RK_Utils.hpp"
 
-#include "Tempus_UnitTest_Utils.hpp"
-
-#include "../TestModels/SinCosModel.hpp"
 
 namespace Tempus_Unit_Test {
 
@@ -24,7 +21,11 @@ using Teuchos::rcp_dynamic_cast;
 // ************************************************************
 TEUCHOS_UNIT_TEST(ERK_5Stage3rdOrderKandG, Default_Construction)
 {
-  testExplicitRKAccessorsFullConstruction("RK Explicit 5 Stage 3rd order by Kinnmark and Gray");
+  auto stepper = rcp(new Tempus::StepperERK_5Stage3rdOrderKandG<double>());
+  testExplicitRKAccessorsFullConstruction(stepper);
+
+  // Test stepper properties.
+  TEUCHOS_ASSERT(stepper->getOrder() == 3);
 }
 
 
@@ -41,7 +42,9 @@ TEUCHOS_UNIT_TEST(ERK_5Stage3rdOrderKandG, StepperFactory_Construction)
 // ************************************************************
 TEUCHOS_UNIT_TEST(ERK_5Stage3rdOrderKandG, AppAction)
 {
-  testRKAppAction("RK Explicit 5 Stage 3rd order by Kinnmark and Gray", out, success);
+  auto stepper = rcp(new Tempus::StepperERK_5Stage3rdOrderKandG<double>());
+  auto model = rcp(new Tempus_Test::SinCosModel<double>());
+  testRKAppAction(stepper, model, out, success);
 }
 
 

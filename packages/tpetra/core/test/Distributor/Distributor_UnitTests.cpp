@@ -728,6 +728,14 @@ namespace {
     myOut << "Make sure that Distributor output doesn't cause a hang" << endl;
     distributor.describe (out, Teuchos::VERB_EXTREME);
 
+    myOut << "Check getReverse(create=false)" << endl;
+    RCP<Distributor> revDistor = distributor.getReverse(false);
+    TEUCHOS_ASSERT(revDistor.is_null());
+
+    myOut << "Check getReverse(create=true)" << endl;
+    revDistor = distributor.getReverse();
+    TEUCHOS_ASSERT(!revDistor.is_null());
+
     myOut << "Check return value of createFromSends" << endl;
     TEST_EQUALITY(numRemoteIDs, as<size_t>(numImages));
 
@@ -757,9 +765,10 @@ namespace {
       std::copy(exports.begin()+myImageID*numImages, exports.begin()+(myImageID+1)*numImages, myExports.begin() );
     }
     // do posts, one Packet to each image
-    Array<Packet> imports(1*distributor.getTotalReceiveLength());
+    Kokkos::View<Packet*, Kokkos::HostSpace> imports("imports", 1*distributor.getTotalReceiveLength());
+    Kokkos::View<const Packet*, Kokkos::HostSpace> myExportsConst(myExports.data(), myExports.size());
     myOut << "Call doPostsAndWaits" << endl;
-    distributor.doPostsAndWaits(myExports().getConst(), 1, imports());
+    distributor.doPostsAndWaits(myExportsConst, 1, imports);
 
     myOut << "Test results" << endl;
     // imports[i] came from image i. it was element "myImageID" in his "myExports" vector.
@@ -867,8 +876,9 @@ namespace {
       std::copy(exports.begin()+myImageID*2*numImages, exports.begin()+(myImageID+1)*2*numImages, myExports.begin() );
     }
     // do posts, one Packet to each image
-    Array<Packet> imports(1*distributor.getTotalReceiveLength());
-    distributor.doPostsAndWaits(myExports().getConst(), 1, imports());
+    Kokkos::View<Packet*, Kokkos::HostSpace> imports("imports", 1*distributor.getTotalReceiveLength());
+    Kokkos::View<const Packet*, Kokkos::HostSpace> myExportsConst(myExports.data(), myExports.size());
+    distributor.doPostsAndWaits(myExportsConst, 1, imports);
     // imports[i] came from image i. it was element "myImageID" in his "myExports" vector.
     // it corresponds to element i*numImages+myImageID in the global export vector
     // make a copy of the corresponding entries in the global vector, then compare these against the
@@ -1041,4 +1051,9 @@ namespace {
 
 # endif // FAST_DEVELOPMENT_UNIT_TEST_BUILD
 
+}
+
+int main(int argc, char* argv[]) {
+  Tpetra::ScopeGuard scopeGuard(&argc, &argv);
+  return Teuchos::UnitTestRepository::runUnitTestsFromMain(argc, argv);
 }

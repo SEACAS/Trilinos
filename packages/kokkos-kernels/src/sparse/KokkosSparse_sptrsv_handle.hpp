@@ -98,6 +98,7 @@ public:
   typedef typename Kokkos::View<size_type *, HandleTempMemorySpace> nnz_row_view_temp_t;
   typedef typename Kokkos::View<size_type *, HandlePersistentMemorySpace> nnz_row_view_t;
   typedef typename nnz_row_view_t::HostMirror host_nnz_row_view_t;
+  typedef typename Kokkos::View<int *, HandlePersistentMemorySpace> int_row_view_t;
  // typedef typename row_lno_persistent_work_view_t::HostMirror row_lno_persistent_work_host_view_t; //Host view type
   typedef typename Kokkos::View<const size_type *, HandlePersistentMemorySpace, Kokkos::MemoryTraits<Kokkos::Unmanaged|Kokkos::RandomAccess>> nnz_row_unmanaged_view_t; // for rank1 subviews
 
@@ -213,7 +214,7 @@ public:
 #endif
 
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
-  using supercols_memory_space = typename execution_space::memory_space;
+  using supercols_memory_space = TemporaryMemorySpace;
 
   using supercols_host_execution_space = Kokkos::DefaultHostExecutionSpace;
   using supercols_host_memory_space = typename supercols_host_execution_space::memory_space;
@@ -221,11 +222,11 @@ public:
   using integer_view_t = Kokkos::View<int*, supercols_memory_space>;
   using integer_view_host_t = Kokkos::View<int*, supercols_host_memory_space>;
 
-  using workspace_t = typename Kokkos::View<scalar_t*, memory_space>;
+  using workspace_t = typename Kokkos::View<scalar_t*, Kokkos::Device<execution_space, supercols_memory_space>>;
 
   //
   using host_crsmat_t = KokkosSparse::CrsMatrix<scalar_t, nnz_lno_t, supercols_host_execution_space, void, size_type>;
-  using crsmat_t      = KokkosSparse::CrsMatrix<scalar_t, nnz_lno_t,                execution_space, void, size_type>;
+  using crsmat_t      = KokkosSparse::CrsMatrix<scalar_t, nnz_lno_t, Kokkos::Device<execution_space, PersistentMemorySpace>, void, size_type>;
 
   //
   using host_graph_t = typename host_crsmat_t::StaticCrsGraphType;
@@ -310,9 +311,13 @@ private:
 
 #ifdef KOKKOSKERNELS_ENABLE_TPL_CUSPARSE
   SPTRSVcuSparseHandleType *cuSPARSEHandle;
+  int_row_view_t tmp_int_rowmap;
 #endif
 
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
+  // specify if unit diagonal
+  bool unit_diag;
+
   // stored either in CSR or CSC
   bool col_major;
 
@@ -343,6 +348,7 @@ private:
   int *etree;
 
   // type of kernels used at each level
+  bool trmm_on_device;
   int sup_size_unblocked;
   int sup_size_blocked;
   integer_view_host_t diag_kernel_type_host;
@@ -409,12 +415,15 @@ public:
     require_symbolic_chain_phase(false)
 #ifdef KOKKOSKERNELS_ENABLE_TPL_CUSPARSE
     , cuSPARSEHandle(nullptr)
+    , tmp_int_rowmap()
 #endif
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
+    , unit_diag (false)
     , merge_supernodes (false)
     , invert_diagonal (true)
     , invert_offdiagonal (false)
     , etree (nullptr)
+    , trmm_on_device (true)
     , sup_size_unblocked (100)
     , sup_size_blocked (200)
     , perm_avail (false)
@@ -438,11 +447,16 @@ public:
 
 #ifdef KOKKOSKERNELS_ENABLE_SUPERNODAL_SPTRSV
   // set nsuper and supercols (# of supernodes, and map from supernode to column id
-  void set_supernodes (signed_integral_t nsuper_, int *supercols_, int *etree_) {
-    // set etree
+  template<class input_int_type>
+  void set_supernodes (signed_integral_t nsuper_, input_int_type *supercols_, int *etree_) {
+    // set etree (just wrap etree in a view)
     this->etree_host = integer_view_host_t (etree_, nsuper_);
-    // set supernodes
-    integer_view_host_t supercols_view = integer_view_host_t (supercols_, 1+nsuper_);
+    // set supernodes (make a copy, from input_int_type to int)
+    integer_view_host_t supercols_view = integer_view_host_t ("supercols", 1+nsuper_);
+    for (signed_integral_t i = 0; i <= nsuper_; i++) {
+      supercols_view (i) = supercols_[i];
+    }
+
     set_supernodes (nsuper_, supercols_view, etree_);
   }
 
@@ -476,6 +490,11 @@ public:
 
     // number of streams
     this->num_streams = 0;
+  }
+
+  // set lower/upper triangular
+  void set_lower_tri(bool lower_tri_) {
+    lower_tri = lower_tri_;
   }
 
   // set supernodal dag
@@ -531,6 +550,16 @@ public:
   integer_view_host_t get_work_offset_host() const { 
     return this->work_offset_host;
   }
+
+  // specify whether too run KokkosKernels::trmm on device or not
+  void set_trmm_on_device (bool flag) {
+    this->trmm_on_device = flag;
+  }
+
+  bool get_trmm_on_device () {
+    return trmm_on_device;
+  }
+
 
   // supernode size tolerance to pick right kernel type
   int get_supernode_size_unblocked() {
@@ -651,6 +680,14 @@ public:
     return this->graph;
   }
 
+  // set if unit diagonal
+  void set_unit_diagonal(bool unit_diag_) {
+    this->unit_diag = unit_diag_;
+  }
+  bool is_unit_diagonal() {
+    return this->unit_diag;
+  }
+
   // set CSR or CSC format
   void set_column_major(bool col_major_) {
     this->col_major = col_major_;
@@ -730,16 +767,16 @@ public:
     if ( this->require_symbolic_lvlsched_phase == true )
     {
       set_num_levels(0);
-      level_list = signed_nnz_lno_view_t(Kokkos::ViewAllocateWithoutInitializing("level_list"), nrows_);
+      level_list = signed_nnz_lno_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "level_list"), nrows_);
       Kokkos::deep_copy( level_list, signed_integral_t(-1) );
       //The host side views need to be initialized, but the device-side views don't.
       //Symbolic computes on the host (and requires these are 0 initialized), and then copies to device.
       hnodes_per_level = hostspace_nnz_lno_view_t("host nodes_per_level", nrows_);
       hnodes_grouped_by_level = hostspace_nnz_lno_view_t("host nodes_grouped_by_level", nrows_);
       nodes_per_level =  nnz_lno_view_t(
-          Kokkos::ViewAllocateWithoutInitializing("nodes_per_level"), nrows_);
+          Kokkos::view_alloc(Kokkos::WithoutInitializing, "nodes_per_level"), nrows_);
       nodes_grouped_by_level = nnz_lno_view_t(
-          Kokkos::ViewAllocateWithoutInitializing("nodes_grouped_by_level"), nrows_);
+          Kokkos::view_alloc(Kokkos::WithoutInitializing, "nodes_grouped_by_level"), nrows_);
 
 #if 0
       std::cout << "  newinit_handle: level schedule allocs" << std::endl;
@@ -752,8 +789,8 @@ public:
     }
 
     if (stored_diagonal) {
-      diagonal_offsets = nnz_lno_view_t(Kokkos::ViewAllocateWithoutInitializing("diagonal_offsets"), nrows_);
-      diagonal_values = nnz_scalar_view_t(Kokkos::ViewAllocateWithoutInitializing("diagonal_values"), nrows_); // inserted by rowid
+      diagonal_offsets = nnz_lno_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "diagonal_offsets"), nrows_);
+      diagonal_values = nnz_scalar_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "diagonal_values"), nrows_); // inserted by rowid
       hdiagonal_offsets = Kokkos::create_mirror_view(diagonal_offsets);
       hdiagonal_values = Kokkos::create_mirror_view(diagonal_values);
     }
@@ -826,6 +863,27 @@ public:
 
   SPTRSVcuSparseHandleType *get_cuSparseHandle(){
     return this->cuSPARSEHandle;
+  }
+
+  void allocate_tmp_int_rowmap (size_type N) {
+    tmp_int_rowmap = int_row_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "tmp_int_rowmap"), N);
+  }
+  template <typename RowViewType>
+  int_row_view_t get_int_rowmap_view_copy (const RowViewType & rowmap) {
+    Kokkos::deep_copy(tmp_int_rowmap, rowmap);
+    return tmp_int_rowmap;
+  }
+  template <typename RowViewType>
+  int* get_int_rowmap_ptr_copy (const RowViewType & rowmap) {
+    Kokkos::deep_copy(tmp_int_rowmap, rowmap);
+    Kokkos::fence();
+    return tmp_int_rowmap.data();
+  }
+  int_row_view_t get_int_rowmap_view () {
+    return tmp_int_rowmap;
+  }
+  int* get_int_rowmap_ptr () {
+    return tmp_int_rowmap.data();
   }
 #endif
 

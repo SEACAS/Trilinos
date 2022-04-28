@@ -1,36 +1,9 @@
 /*
- * Copyright(C) 2010-2017, 2020 National Technology & Engineering Solutions
+ * Copyright(C) 1999-2020 National Technology & Engineering Solutions
  * of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
  * NTESS, the U.S. Government retains certain rights in this software.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *
- *     * Neither the name of NTESS nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * See packages/seacas/LICENSE for details
  */
 #ifndef SEACAS_ExodusEntity_H
 #define SEACAS_ExodusEntity_H
@@ -57,26 +30,51 @@ namespace Excn {
     size_t count(ObjectType type) const
     {
       switch (type) {
-      case EBLK: return blockCount;
-      case NSET: return nodesetCount;
-      case SSET: return sidesetCount;
-      case NODE: return nodeCount;
-      case ELEM: return elementCount;
+      case Excn::ObjectType::EBLK: return blockCount;
+      case Excn::ObjectType::NSET: return nodesetCount;
+      case Excn::ObjectType::SSET: return sidesetCount;
+      case Excn::ObjectType::NODE: return nodeCount;
+      case Excn::ObjectType::ELEM: return elementCount;
+      case Excn::ObjectType::EDGE: return edgeCount;
+      case Excn::ObjectType::FACE: return faceCount;
+      case Excn::ObjectType::ASSM: return assemblyCount;
+      case Excn::ObjectType::EDBLK: return edgeBlockCount;
+      case Excn::ObjectType::FABLK: return faceBlockCount;
       default: return 0;
       }
     }
 
-    IntVector truthTable[3];
+    IntVector truthTable[5];
 
     std::string title{};
     int         dimensionality{0};
     int64_t     nodeCount{0};
     int64_t     elementCount{0};
+    int64_t     edgeCount{0};
+    int64_t     faceCount{0};
     int         blockCount{0};
     int         nodesetCount{0};
     int         sidesetCount{0};
+    int         assemblyCount{0};
+    int         edgeBlockCount{0};
+    int         faceBlockCount{0};
     bool        needNodeMap{true};
     bool        needElementMap{true};
+  };
+
+  class Assembly
+  {
+  public:
+    Assembly() = default;
+
+    size_t     entity_count() const { return entityCount; }
+    ObjectType entity_type() const { return type_; }
+
+    ex_entity_id         id{0};
+    std::string          name_{""};
+    ObjectType           type_{Excn::ObjectType::UNSET};
+    int                  entityCount{0};
+    std::vector<int64_t> entityList;
   };
 
   class Block
@@ -155,7 +153,7 @@ namespace Excn {
     }
   };
 
-  typedef std::pair<int64_t, int64_t> Side;
+  using Side = std::pair<int64_t, int64_t>;
   template <typename INT> class SideSet
   {
   public:
@@ -178,6 +176,98 @@ namespace Excn {
     {
       fmt::print(stderr, "SideSet {}, Name: {}, {} sides, {} df\toffset = {}, order = {}\n", id,
                  name_, sideCount, dfCount, offset_, position_);
+    }
+  };
+
+  template <typename INT> class EdgeBlock
+  {
+  public:
+    EdgeBlock() { copy_string(elType, ""); }
+
+    EdgeBlock(const EdgeBlock &other)
+        : name_(other.name_), id(other.id), edgeCount(other.edgeCount),
+          nodesPerEdge(other.nodesPerEdge), attributeCount(other.attributeCount),
+          offset_(other.offset_), position_(other.position_)
+    {
+      copy_string(elType, other.elType);
+    }
+    ~EdgeBlock() = default;
+
+    char                     elType[MAX_STR_LENGTH + 1]{};
+    std::string              name_{""};
+    std::vector<std::string> attributeNames{};
+    int64_t                  id{0};
+    int64_t                  edgeCount{0};
+    int                      nodesPerEdge{0};
+    int                      attributeCount{0};
+    int64_t                  offset_{0};
+    int                      position_{0};
+
+    size_t entity_count() const { return edgeCount; }
+
+    void dump() const
+    {
+      fmt::print(stderr, "EdgeBlock {}, Name: {}, {} edges\n", id, name_, edgeCount);
+    }
+
+    EdgeBlock &operator=(const EdgeBlock &other)
+    {
+      copy_string(elType, other.elType);
+      name_          = other.name_;
+      id             = other.id;
+      edgeCount      = other.edgeCount;
+      nodesPerEdge   = other.nodesPerEdge;
+      attributeCount = other.attributeCount;
+      attributeNames = other.attributeNames;
+      offset_        = other.offset_;
+      position_      = other.position_;
+      return *this;
+    }
+  };
+
+  template <typename INT> class FaceBlock
+  {
+  public:
+    FaceBlock() { copy_string(elType, ""); }
+
+    FaceBlock(const FaceBlock &other)
+        : name_(other.name_), id(other.id), faceCount(other.faceCount),
+          nodesPerFace(other.nodesPerFace), attributeCount(other.attributeCount),
+          offset_(other.offset_), position_(other.position_)
+    {
+      copy_string(elType, other.elType);
+    }
+    ~FaceBlock() = default;
+
+    char                     elType[MAX_STR_LENGTH + 1]{};
+    std::string              name_{""};
+    std::vector<std::string> attributeNames{};
+    int64_t                  id{0};
+    int64_t                  faceCount{0};
+    int                      nodesPerFace{0};
+    int                      attributeCount{0};
+    int64_t                  offset_{0};
+    int                      position_{0};
+
+    size_t entity_count() const { return faceCount; }
+
+    void dump() const
+    {
+      fmt::print(stderr, "FaceBlock {}, Name: {}, {} faces\n", id, name_, faceCount);
+    }
+
+    FaceBlock &operator=(const FaceBlock &other)
+    {
+      copy_string(elType, other.elType);
+      name_          = other.name_;
+      id             = other.id;
+      faceCount      = other.faceCount;
+      nodesPerFace   = other.nodesPerFace;
+      attributeCount = other.attributeCount;
+      attributeNames = other.attributeNames;
+      offset_        = other.offset_;
+      position_      = other.position_;
+      return *this;
     }
   };
 

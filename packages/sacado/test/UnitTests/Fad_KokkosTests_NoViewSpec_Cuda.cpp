@@ -33,16 +33,13 @@
 // Disable view specializations
 #define SACADO_DISABLE_FAD_VIEW_SPEC
 
+#include "Kokkos_Macros.hpp"
+
+#define SACADO_TEST_DFAD 1
+
 #include "Fad_KokkosTests.hpp"
 
-#include "Kokkos_Core.hpp"
-
 // Instantiate tests for Cuda device
-#if defined(KOKKOS_ENABLE_CUDA_UVM)
-#define SACADO_TEST_DFAD 1
-#else
-#define SACADO_TEST_DFAD 0
-#endif
 using Kokkos::Cuda;
 VIEW_FAD_TESTS_D( Cuda )
 

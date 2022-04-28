@@ -1,34 +1,8 @@
-// Copyright(C) 1999-2017, 2020 National Technology & Engineering Solutions
+// Copyright(C) 1999-2022 National Technology & Engineering Solutions
 // of Sandia, LLC (NTESS).  Under the terms of Contract DE-NA0003525 with
 // NTESS, the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//
-//     * Neither the name of NTESS nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// See packages/seacas/LICENSE for details
 
 #include <Ioss_CodeTypes.h>
 #include <Ioss_ParallelUtils.h>
@@ -36,7 +10,6 @@
 #include <Ioss_Utils.h>
 #include <algorithm>
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -51,8 +24,6 @@
 #endif
 
 namespace {
-  auto initial_time = std::chrono::high_resolution_clock::now();
-
 #ifdef SEACAS_HAVE_MPI
   MPI_Op which_reduction(Ioss::ParallelUtils::MinMax which)
   {
@@ -71,7 +42,7 @@ namespace {
 #endif
 } // namespace
 
-Ioss::ParallelUtils::ParallelUtils(MPI_Comm the_communicator) : communicator_(the_communicator) {}
+Ioss::ParallelUtils::ParallelUtils(Ioss_MPI_Comm the_communicator) : communicator_(the_communicator) {}
 
 void Ioss::ParallelUtils::add_environment_properties(Ioss::PropertyManager &properties)
 {
@@ -101,7 +72,7 @@ void Ioss::ParallelUtils::add_environment_properties(Ioss::PropertyManager &prop
       bool        all_digit = value.find_first_not_of("0123456789") == std::string::npos;
 
       if (do_print && rank == 0) {
-        fmt::print(stderr, "IOSS: Adding property '{}' with value '{}'\n", prop, value);
+        fmt::print(Ioss::OUTPUT(), "IOSS: Adding property '{}' with value '{}'\n", prop, value);
       }
       if (all_digit) {
         int int_value = std::stoi(value);
@@ -126,7 +97,7 @@ bool Ioss::ParallelUtils::get_environment(const std::string &name, std::string &
 {
   PAR_UNUSED(sync_parallel);
 #ifdef SEACAS_HAVE_MPI
-  char *            result_string = nullptr;
+  char             *result_string = nullptr;
   std::vector<char> broadcast_string;
 
   int string_length = 0;
@@ -138,7 +109,7 @@ bool Ioss::ParallelUtils::get_environment(const std::string &name, std::string &
   }
 
   if (sync_parallel && parallel_size() > 1) {
-    MPI_Bcast(&string_length, 1, MPI_INT, 0, communicator_);
+    broadcast(string_length);
 
     if (string_length > 0) {
       broadcast_string.resize(string_length + 1);
@@ -146,7 +117,7 @@ bool Ioss::ParallelUtils::get_environment(const std::string &name, std::string &
         Ioss::Utils::copy_string(broadcast_string.data(), result_string,
                                  static_cast<size_t>(string_length) + 1);
       }
-      MPI_Bcast(broadcast_string.data(), string_length + 1, MPI_CHAR, 0, communicator_);
+      broadcast(broadcast_string);
       value = std::string(broadcast_string.data());
     }
     else {
@@ -203,7 +174,7 @@ bool Ioss::ParallelUtils::get_environment(const std::string &name, bool sync_par
   }
 
   if (sync_parallel && parallel_size() > 1) {
-    MPI_Bcast(&string_length, 1, MPI_INT, 0, communicator_);
+    broadcast(string_length);
   }
 
   return string_length > 0;
@@ -231,24 +202,28 @@ std::string Ioss::ParallelUtils::decode_filename(const std::string &filename,
 
 int Ioss::ParallelUtils::parallel_size() const
 {
-  int my_size = 1;
+  if (parallelSize_ == -1) {
+    parallelSize_ = 1;
 #ifdef SEACAS_HAVE_MPI
-  if (communicator_ != MPI_COMM_NULL) {
-    MPI_Comm_size(communicator_, &my_size);
-  }
+    if (communicator_ != Ioss::ParallelUtils::comm_null()) {
+      MPI_Comm_size(communicator_, &parallelSize_);
+    }
 #endif
-  return my_size;
+  }
+  return parallelSize_;
 }
 
 int Ioss::ParallelUtils::parallel_rank() const
 {
-  int my_rank = 0;
+  if (parallelRank_ == -1) {
+    parallelRank_ = 0;
 #ifdef SEACAS_HAVE_MPI
-  if (communicator_ != MPI_COMM_NULL) {
-    MPI_Comm_rank(communicator_, &my_rank);
-  }
+    if (communicator_ != Ioss::ParallelUtils::comm_null()) {
+      MPI_Comm_rank(communicator_, &parallelRank_);
+    }
 #endif
-  return my_rank;
+  }
+  return parallelRank_;
 }
 
 void Ioss::ParallelUtils::memory_stats(int64_t &min, int64_t &max, int64_t &avg) const
@@ -329,7 +304,7 @@ void Ioss::ParallelUtils::barrier() const
 }
 
 void Ioss::ParallelUtils::global_count(const IntVector &local_counts,
-                                       IntVector &      global_counts) const
+                                       IntVector       &global_counts) const
 {
   // Vector 'local_counts' contains the number of objects
   // local to this processor.  On exit, global_counts
@@ -363,7 +338,7 @@ void Ioss::ParallelUtils::global_count(const IntVector &local_counts,
 }
 
 void Ioss::ParallelUtils::global_count(const Int64Vector &local_counts,
-                                       Int64Vector &      global_counts) const
+                                       Int64Vector       &global_counts) const
 {
   // Vector 'local_counts' contains the number of objects
   // local to this processor.  On exit, global_counts
@@ -400,7 +375,7 @@ template int Ioss::ParallelUtils::global_minmax(int, Ioss::ParallelUtils::MinMax
 template unsigned int Ioss::ParallelUtils::global_minmax(unsigned int,
                                                          Ioss::ParallelUtils::MinMax which) const;
 template int64_t      Ioss::ParallelUtils::global_minmax(int64_t,
-                                                    Ioss::ParallelUtils::MinMax which) const;
+                                                         Ioss::ParallelUtils::MinMax which) const;
 template double Ioss::ParallelUtils::global_minmax(double, Ioss::ParallelUtils::MinMax which) const;
 
 template <typename T>
@@ -433,6 +408,81 @@ T Ioss::ParallelUtils::global_minmax(T local_minmax, Ioss::ParallelUtils::MinMax
   }
 #endif
   return minmax;
+}
+
+/// \relates Ioss::ParallelUtils::broadcast
+template void Ioss::ParallelUtils::broadcast(double &value, int) const;
+/// \relates Ioss::ParallelUtils::broadcast
+template void Ioss::ParallelUtils::broadcast(int &value, int) const;
+/// \relates Ioss::ParallelUtils::broadcast
+template void Ioss::ParallelUtils::broadcast(int64_t &value, int) const;
+
+template <> void Ioss::ParallelUtils::broadcast(std::string &my_str, int root) const
+{
+#ifdef SEACAS_HAVE_MPI
+  if (parallel_size() > 1) {
+    const int success = MPI_Bcast(const_cast<char *>(my_str.data()), (int)my_str.size()+1, MPI_CHAR, root, communicator_);
+    if (success != MPI_SUCCESS) {
+      std::ostringstream errmsg;
+      fmt::print(errmsg, "{} - MPI_Broadcast failed", __func__);
+      IOSS_ERROR(errmsg);
+    }
+  }
+#endif
+}
+
+template <typename T> void Ioss::ParallelUtils::broadcast(T &my_value, int root) const
+{
+#ifdef SEACAS_HAVE_MPI
+  if (parallel_size() > 1) {
+    const int success = MPI_Bcast((void *)&my_value, 1, mpi_type(T()), root, communicator_);
+    if (success != MPI_SUCCESS) {
+      std::ostringstream errmsg;
+      fmt::print(errmsg, "{} - MPI_Broadcast failed", __func__);
+      IOSS_ERROR(errmsg);
+    }
+  }
+#endif
+}
+
+/// \relates Ioss::ParallelUtils::broadcast
+template void Ioss::ParallelUtils::broadcast(std::vector<double> &, int) const;
+/// \relates Ioss::ParallelUtils::broadcast
+template void Ioss::ParallelUtils::broadcast(std::vector<int> &, int) const;
+/// \relates Ioss::ParallelUtils::broadcast
+template void Ioss::ParallelUtils::broadcast(std::vector<long> &, int) const;
+/// \relates Ioss::ParallelUtils::broadcast
+template void Ioss::ParallelUtils::broadcast(std::vector<long long> &, int) const;
+/// \relates Ioss::ParallelUtils::broadcast
+template void Ioss::ParallelUtils::broadcast(std::vector<char> &, int) const;
+/// \relates Ioss::ParallelUtils::broadcast
+template <> void Ioss::ParallelUtils::broadcast(std::vector<std::pair<int,int>> &my_value, int root) const
+{
+#ifdef SEACAS_HAVE_MPI
+  if (parallel_size() > 1) {
+    const int success = MPI_Bcast(my_value.data(), (int)my_value.size() * 2, mpi_type(int(0)), root, communicator_);
+    if (success != MPI_SUCCESS) {
+      std::ostringstream errmsg;
+      fmt::print(errmsg, "{} - MPI_Broadcast failed", __func__);
+      IOSS_ERROR(errmsg);
+    }
+  }
+#endif
+}
+
+
+template <typename T> void Ioss::ParallelUtils::broadcast(std::vector<T> &my_value, int root) const
+{
+#ifdef SEACAS_HAVE_MPI
+  if (parallel_size() > 1) {
+    const int success = MPI_Bcast(my_value.data(), (int)my_value.size(), mpi_type(T()), root, communicator_);
+    if (success != MPI_SUCCESS) {
+      std::ostringstream errmsg;
+      fmt::print(errmsg, "{} - MPI_Broadcast failed", __func__);
+      IOSS_ERROR(errmsg);
+    }
+  }
+#endif
 }
 
 /// \relates Ioss::ParallelUtils::gather
@@ -527,7 +577,7 @@ void Ioss::ParallelUtils::progress(const std::string &output) const
 
   if (parallel_rank() == 0) {
     double diff = Utils::timer() - begin;
-    fmt::print(stderr, "  [{:.3f}] ({}MiB  {}MiB  {}MiB)\t{}\n", diff, min / MiB, max / MiB,
+    fmt::print(Ioss::DEBUG(), "  [{:.3f}] ({}MiB  {}MiB  {}MiB)\t{}\n", diff, min / MiB, max / MiB,
                avg / MiB, output);
   }
 }

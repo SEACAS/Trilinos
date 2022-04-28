@@ -126,7 +126,7 @@ namespace MueLu {
       } else {
         RCP<BlockedCrsMatrix> bA00 = Teuchos::rcp_dynamic_cast<BlockedCrsMatrix>(A00);
         TEUCHOS_TEST_FOR_EXCEPTION(bA00.is_null()==false, MueLu::Exceptions::RuntimeError,"MueLu::SchurComplementFactory::Build: Mass lumping not implemented. Implement a mass lumping kernel!");
-        diag = Utilities::GetLumpedMatrixDiagonal(A00);
+        diag = Utilities::GetLumpedMatrixDiagonal(*A00);
       }
       // invert diagonal vector. Replace all entries smaller than 1e-4 by one!
       RCP<Vector> D = (!fixing ? Utilities::GetInverse(diag) : Utilities::GetInverse(diag, 1e-4, one));
@@ -142,8 +142,8 @@ namespace MueLu {
         TEUCHOS_TEST_FOR_EXCEPTION(T->getRangeMap()->isSameAs(*(A10->getDomainMap())) == false, Exceptions::RuntimeError,
                                    "MueLu::SchurComplementFactory::Build: RangeMap of A01 and domain map of A10 are not the same.");
         RCP<ParameterList> myparams = rcp(new ParameterList);
+        myparams->set("compute global constants", true);
         S = Xpetra::MatrixMatrix<Scalar, LocalOrdinal, GlobalOrdinal, Node>::Multiply(*A10, false, *T, false, GetOStream(Statistics2),true,true,std::string("SchurComplementFactory"),myparams);
-
       } else {
         // nested blocking
         RCP<BlockedCrsMatrix> bA10 = Teuchos::rcp_dynamic_cast<BlockedCrsMatrix>(A10);
@@ -177,7 +177,7 @@ namespace MueLu {
       if (!A11.is_null()) {
         S = MatrixFactory::BuildCopy(A11);
       } else {
-        S = MatrixFactory::Build(A11->getRowMap(), 10 /*A11->getNodeMaxNumRowEntries()*/);
+        S = MatrixFactory::Build(A11->getRowMap(), 10 /*A11->getLocalMaxNumRowEntries()*/);
         S->fillComplete(A11->getDomainMap(),A11->getRangeMap());
       }
     }
